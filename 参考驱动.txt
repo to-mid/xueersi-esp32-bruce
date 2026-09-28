@@ -1,0 +1,288 @@
+/*
+ * ESP32 ST7735 160x128 WiFi Pixel Receiver - 支持 RAW 全帧、Tile 分块、Diff 差分
+ * 
+ * 新增协议：
+ *   PXFR: 全帧 RGB565 (40960 bytes)
+ *   PXTL: Tile 更新 (8x8 或 16x16)
+ * 保留 PXUP/PXUR 差分协议
+ */
+
+#include <WiFi.h>
+#include <SPI.h>
+#include <cstdlib>
+
+// ================= WiFi 配置 =================
+const char* ssid = "to-mid";
+const char* password = "tomidi1122";
+
+WiFiServer server(8090);
+WiFiClient client;
+
+// ================= 屏幕引脚 =================
+#define TFT_SCK   18
+#define TFT_MOSI  23
+#define TFT_CS     5
+#define TFT_DC     4
+#define TFT_RST   19
+#define TFT_SPI_FREQ 40000000
+
+// ================= 屏幕尺寸 =================
+#define SCREEN_WIDTH   160
+#define SCREEN_HEIGHT  128
+
+// ================= 帧缓冲与脏行 =================
+uint16_t frameBuf[SCREEN_WIDTH * SCREEN_HEIGHT];
+bool dirtyRows[SCREEN_HEIGHT];
+
+unsigned long lastPacketTime = 0;
+const uint32_t FLUSH_IDLE_MS = 50;
+uint32_t currentFrameId = 0xFFFFFFFF;
+bool hasFrameStarted = false;
+
+// ================= 统计 =================
+uint32_t frameCount = 0;
+uint32_t updateCount = 0;
+uint32_t lastFrameId = 0;
+unsigned long lastStats = 0;
+
+// ================= 包缓冲区 =================
+uint8_t* packetBuf = nullptr;
+uint32_t packetBufCap = 0;
+
+bool ensurePacketBuf(uint32_t need) {
+  if (packetBuf && packetBufCap >= need) return true;
+  if (packetBuf) { free(packetBuf); packetBuf = nullptr; packetBufCap = 0; }
+  packetBuf = (uint8_t*)malloc(need);
+  if (!packetBuf) { Serial.print("malloc failed, need="); Serial.println(need); return false; }
+  packetBufCap = need;
+  return true;
+}
+
+void releasePacketBuf() {
+  if (packetBuf) { free(packetBuf); packetBuf = nullptr; packetBufCap = 0; }
+}
+
+// ================= SPI 驱动 =================
+SPIClass tftSPI(VSPI);
+SPISettings tftSPISettings(TFT_SPI_FREQ, MSBFIRST, SPI_MODE0);
+
+static inline void busBegin() {
+  tftSPI.beginTransaction(tftSPISettings);
+  digitalWrite(TFT_CS, LOW);
+}
+static inline void busEnd() {
+  digitalWrite(TFT_CS, HIGH);
+  tftSPI.endTransaction();
+}
+static inline void writeCmdRaw(uint8_t cmd) {
+  digitalWrite(TFT_DC, LOW);
+  tftSPI.write(cmd);
+}
+static inline void writeDataRaw(const uint8_t* data, size_t len) {
+  digitalWrite(TFT_DC, HIGH);
+  tftSPI.writeBytes((uint8_t*)data, len);
+}
+void sendCommand(uint8_t cmd) { busBegin(); writeCmdRaw(cmd); busEnd(); }
+void sendCommandData(uint8_t cmd, const uint8_t* data, size_t len) {
+  busBegin(); writeCmdRaw(cmd); if (data && len>0) writeDataRaw(data, len); busEnd();
+}
+void tftReset() { /* ... 与原来相同 */ }
+void setWindowRaw(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) { /* ... */ }
+void tftInit() { /* ... 与原来相同，省略 */ }
+
+// ================= 帧缓冲操作 =================
+void clearFrameBuffer(uint16_t color) {
+  for (int i = 0; i < SCREEN_WIDTH * SCREEN_HEIGHT; i++) frameBuf[i] = color;
+  for (int y = 0; y < SCREEN_HEIGHT; y++) dirtyRows[y] = true;
+}
+void putPixelToBuffer(uint8_t x, uint8_t y, uint16_t color) {
+  if (x >= SCREEN_WIDTH || y >= SCREEN_HEIGHT) return;
+  frameBuf[y * SCREEN_WIDTH + x] = color;
+  dirtyRows[y] = true;
+}
+void putRunToBuffer(uint8_t y, uint8_t x0, uint8_t len, uint16_t color) {
+  // ... 与原来相同
+}
+void putTileToBuffer(uint8_t x, uint8_t y, uint8_t tileSize, const uint8_t* data) {
+  // 将 tile 数据写入 frameBuf
+  uint16_t* rowBase = &frameBuf[y * tileSize * SCREEN_WIDTH + x * tileSize];
+  for (uint8_t row = 0; row < tileSize; row++) {
+    uint16_t* rowPtr = rowBase + row * SCREEN_WIDTH;
+    for (uint8_t col = 0; col < tileSize; col++) {
+      uint16_t color = ((uint16_t)data[(row * tileSize + col) * 2] << 8) | data[(row * tileSize + col) * 2 + 1];
+      rowPtr[col] = color;
+    }
+    dirtyRows[y * tileSize + row] = true;
+  }
+}
+
+// ================= 刷新函数 =================
+void flushRowsBlock(uint16_t y0, uint16_t y1) {
+  if (y1 < y0) return;
+  busBegin();
+  setWindowRaw(0, y0, SCREEN_WIDTH-1, y1);
+  digitalWrite(TFT_DC, HIGH);
+  for (uint16_t y = y0; y <= y1; y++) {
+    uint16_t* row = &frameBuf[y * SCREEN_WIDTH];
+    for (uint16_t x = 0; x < SCREEN_WIDTH; x++) {
+      uint16_t color = row[x];
+      tftSPI.write(color >> 8);
+      tftSPI.write(color & 0xFF);
+    }
+  }
+  busEnd();
+}
+void flushDirtyRows() {
+  int y0=-1, y1=-1;
+  for (int y=0; y<SCREEN_HEIGHT; y++) if (dirtyRows[y]) { if (y0<0) y0=y; y1=y; }
+  if (y0<0) return;
+  for (int y=y0; y<=y1; y++) dirtyRows[y] = false;
+  flushRowsBlock(y0, y1);
+}
+
+// ================= 帧切换 =================
+void beginPacketFrame(uint32_t frameId) {
+  if (!hasFrameStarted) { currentFrameId = frameId; hasFrameStarted = true; return; }
+  if (frameId != currentFrameId) {
+    flushDirtyRows();
+    currentFrameId = frameId;
+  }
+}
+
+// ================= 协议解析 =================
+const uint8_t MAGIC_PIXEL[4] = {'P','X','U','P'};
+const uint8_t MAGIC_RUN[4]   = {'P','X','U','R'};
+const uint8_t MAGIC_RAW[4]   = {'P','X','F','R'};
+const uint8_t MAGIC_TILE[4]  = {'P','X','T','L'};
+const size_t HEADER_SIZE = 11;
+
+bool readExactly(WiFiClient& c, uint8_t* dst, size_t len) {
+  size_t got=0; unsigned long lastData=millis();
+  while (got<len && c.connected()) {
+    int n = c.read(dst+got, len-got);
+    if (n>0) { got+=n; lastData=millis(); }
+    else {
+      if (millis()-lastData > 3000) return false;
+      delay(1);
+    }
+  }
+  return got==len;
+}
+
+// ---------- 处理 RAW 全帧 ----------
+bool handleRawPacket(uint8_t* headerRest) {
+  // headerRest: version(1), frame_id(4), payload_len(4)
+  if (headerRest[0] != 1) { Serial.println("Unsupported PXFR version"); return false; }
+  uint32_t frameId = ((uint32_t)headerRest[1]) | ((uint32_t)headerRest[2]<<8) | ((uint32_t)headerRest[3]<<16) | ((uint32_t)headerRest[4]<<24);
+  uint32_t payloadLen = ((uint32_t)headerRest[5]) | ((uint32_t)headerRest[6]<<8) | ((uint32_t)headerRest[7]<<16) | ((uint32_t)headerRest[8]<<24);
+  if (payloadLen != SCREEN_WIDTH*SCREEN_HEIGHT*2) { Serial.println("PXFR payload len mismatch"); return false; }
+  beginPacketFrame(frameId);
+  if (!ensurePacketBuf(payloadLen)) return false;
+  if (!readExactly(client, packetBuf, payloadLen)) { Serial.println("PXFR body read failed"); return false; }
+  // 写入 frameBuf (大端转小端)
+  uint16_t* dst = frameBuf;
+  for (uint32_t i=0; i<payloadLen/2; i++) {
+    dst[i] = ((uint16_t)packetBuf[i*2] << 8) | packetBuf[i*2+1];
+  }
+  // 标记所有行为脏
+  for (int y=0; y<SCREEN_HEIGHT; y++) dirtyRows[y] = true;
+  frameCount++; lastFrameId = frameId; lastPacketTime = millis();
+  return true;
+}
+
+// ---------- 处理 TILE 更新 ----------
+bool handleTilePacket(uint8_t* headerRest) {
+  if (headerRest[0] != 1) { Serial.println("Unsupported PXTL version"); return false; }
+  uint32_t frameId = ((uint32_t)headerRest[1]) | ((uint32_t)headerRest[2]<<8) | ((uint32_t)headerRest[3]<<16) | ((uint32_t)headerRest[4]<<24);
+  uint16_t count = headerRest[5] | (headerRest[6]<<8);
+  beginPacketFrame(frameId);
+  // 读取每个 tile: x(1), y(1), data(tileSize*tileSize*2)
+  const uint8_t TILE_SIZE = 8; // 固定 8x8，可与发送端协商，此处暂定 8
+  uint32_t perTile = 2 + TILE_SIZE*TILE_SIZE*2;
+  uint32_t bodyLen = count * perTile;
+  if (bodyLen == 0) { frameCount++; lastFrameId=frameId; lastPacketTime=millis(); return true; }
+  if (!ensurePacketBuf(bodyLen)) return false;
+  if (!readExactly(client, packetBuf, bodyLen)) { Serial.println("PXTL body read failed"); return false; }
+  for (uint16_t i=0; i<count; i++) {
+    uint8_t* entry = packetBuf + i*perTile;
+    uint8_t tileX = entry[0];
+    uint8_t tileY = entry[1];
+    uint8_t* data = entry + 2;
+    putTileToBuffer(tileX, tileY, TILE_SIZE, data);
+  }
+  frameCount++; updateCount += count; lastFrameId=frameId; lastPacketTime=millis();
+  return true;
+}
+
+// ---------- 原有 PXUP/PXUR 处理（保留） ----------
+bool handlePixelPacket(uint8_t* headerRest) { /* 与原来相同，略 */ }
+bool handleRunPacket(uint8_t* headerRest) { /* 与原来相同，略 */ }
+
+// ---------- 客户端主处理 ----------
+bool handleClient() {
+  if (!client || !client.connected()) {
+    WiFiClient newClient = server.available();
+    if (newClient) {
+      client = newClient;
+      client.setNoDelay(true);
+      client.setTimeout(50);
+      Serial.println("Client connected");
+      clearFrameBuffer(0x0000);
+      flushDirtyRows();
+      frameCount=0; updateCount=0; lastFrameId=0; hasFrameStarted=false; currentFrameId=0xFFFFFFFF; lastStats=millis();
+    }
+  }
+  if (!client || !client.connected()) return false;
+  if (client.available() < HEADER_SIZE) return true;
+
+  uint8_t magic[4];
+  if (!readExactly(client, magic, 4)) { Serial.println("Read magic failed"); client.stop(); return false; }
+
+  uint8_t rest[HEADER_SIZE-4];
+  if (!readExactly(client, rest, sizeof(rest))) { Serial.println("Read header rest failed"); client.stop(); return false; }
+
+  bool ok = false;
+  if (memcmp(magic, MAGIC_RAW, 4) == 0) {
+    ok = handleRawPacket(rest);
+  } else if (memcmp(magic, MAGIC_TILE, 4) == 0) {
+    ok = handleTilePacket(rest);
+  } else if (memcmp(magic, MAGIC_PIXEL, 4) == 0) {
+    ok = handlePixelPacket(rest);
+  } else if (memcmp(magic, MAGIC_RUN, 4) == 0) {
+    ok = handleRunPacket(rest);
+  } else {
+    Serial.println("Bad magic"); client.stop(); return false;
+  }
+  if (!ok) { Serial.println("Packet handle failed"); client.stop(); return false; }
+
+  unsigned long now = millis();
+  if (now - lastStats >= 2000) {
+    Serial.print("frames="); Serial.print(frameCount); Serial.print(" lastFrameId="); Serial.print(lastFrameId);
+    Serial.print(" updates="); Serial.println(updateCount);
+    lastStats = now;
+  }
+  return true;
+}
+
+// ================= setup / loop =================
+void setup() {
+  Serial.begin(115200); delay(500); Serial.println("Booting...");
+  tftInit();
+  clearFrameBuffer(0x0000); flushDirtyRows();
+  WiFi.mode(WIFI_STA); WiFi.begin(ssid, password);
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print("."); if (millis()-start>30000) { ... } }
+  WiFi.setSleep(false);
+  server.begin(); server.setNoDelay(true);
+  Serial.println("IP: " + WiFi.localIP().toString());
+  // 启动闪绿...
+}
+
+void loop() {
+  handleClient();
+  if (client && !client.connected()) { Serial.println("Client disconnected"); client.stop(); }
+  if ((!client || !client.connected() || client.available() == 0) && millis()-lastPacketTime >= FLUSH_IDLE_MS) {
+    flushDirtyRows();
+  }
+  delay(0);
+}
