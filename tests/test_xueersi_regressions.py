@@ -165,6 +165,57 @@ int main() {
 ''', encoding='utf-8')
         run(formatting, 'serial_formatting', ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'])
 
+        timer = (ROOT / 'src/modules/others/timer.cpp').read_text(encoding='utf-8')
+        timer_test = directory / 'timer.cpp'
+        timer_test.write_text(r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+#include <utility>
+int tftWidth, tftHeight;
+constexpr int BORDER_PAD_X=10, BORDER_PAD_Y=28, FM=1, LH=8;
+constexpr uint16_t TFT_DARKGREY=1, TFT_GREEN=2, TFT_RED=3;
+struct { uint16_t priColor=1, bgColor=0; } bruceConfig;
+struct Display {
+    int size=1;
+    void setTextSize(int s) { size=s; }
+    int textWidth(const char* text,int) { return strlen(text)*6*size; }
+    int fontHeight(int) { return 8*size; }
+    void setTextColor(int,int) {}
+    void point(int x,int y) { assert(x>=0 && x<tftWidth && y>=0 && y<tftHeight); }
+    void drawLine(int x,int y,int x2,int y2,int) { point(x,y); point(x2,y2); }
+    void fillRect(int x,int y,int w,int h,int) { point(x,y); point(x+w-1,y+h-1); }
+    void drawCentreString(const char* text,int x,int y,int font) {
+        int width=textWidth(text,font); point(x-width/2,y); point(x-width/2+width-1,y+fontHeight(font)-1);
+    }
+} tft;
+struct Timer {
+    int fontSize=1,timerX,timerY,underlineY,soundY,timeWidth,fieldWidth,fieldStride;
+    bool playSoundOnFinish=true;
+    void calculateLayout(); void underlineField(int);
+    void clearUnderline(); void underlineHours(); void underlineMinutes(); void underlineSeconds();
+    void drawSoundOption(bool);
+};
+''' + '\n'.join(function(timer, 'void Timer::' + name + '(') for name in [
+            'calculateLayout', 'underlineField', 'clearUnderline', 'underlineHours',
+            'underlineMinutes', 'underlineSeconds', 'drawSoundOption']) + r'''
+int main() {
+    for (auto dims : {std::pair<int,int>{160,128},{128,160},{240,135},{320,240}}) {
+        tftWidth=dims.first; tftHeight=dims.second;
+        Timer timer; timer.calculateLayout();
+        tft.setTextSize(timer.fontSize);
+        tft.drawCentreString("99:59:59",timer.timerX,timer.timerY,1);
+        assert(timer.timerY > BORDER_PAD_Y+FM*LH);
+        assert(timer.soundY > timer.underlineY);
+        timer.clearUnderline(); timer.underlineHours(); timer.underlineMinutes(); timer.underlineSeconds();
+        timer.drawSoundOption(true); timer.playSoundOnFinish=false; timer.drawSoundOption(false);
+    }
+}
+''', encoding='utf-8')
+        run(timer_test, 'timer_small_screens', ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'])
+
 
 if __name__ == '__main__':
     main()

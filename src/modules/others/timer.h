@@ -13,13 +13,19 @@
 
 class Timer {
 private:
-    int fontSize = 4;
+    int fontSize = 1;
     int duration = 0;
     int timerX = tftWidth / 2;
     int timerY = tftHeight / 2;
-    int underlineY = timerY + (fontSize + 1) * LH;
+    int underlineY = 0;
+    int soundY = 0;
+    int timeWidth = 0;
+    int fieldWidth = 0;
+    int fieldStride = 0;
     bool playSoundOnFinish = true; // Sound option
 
+    void calculateLayout();
+    void underlineField(int field);
     void clearUnderline();
     void underlineHours();
     void underlineMinutes();

@@ -35,7 +35,33 @@ Timer::~Timer() {
     backToMenu();
 }
 
+void Timer::calculateLayout() {
+    timerX = tftWidth / 2;
+    tft.setTextSize(1);
+    const int soundHeight = tft.fontHeight(1);
+    const int top = BORDER_PAD_Y + FM * LH + 8;
+    const int bottom = tftHeight - BORDER_PAD_X;
+    int blockHeight = 0;
+    for (int size = 4; size >= 1; --size) {
+        tft.setTextSize(size);
+        blockHeight = tft.fontHeight(1) + 2 + 2 * LH + soundHeight + 4;
+        if (tft.textWidth("00:00:00", 1) <= tftWidth - 2 * BORDER_PAD_X &&
+            blockHeight <= bottom - top) {
+            fontSize = size;
+            break;
+        }
+    }
+    tft.setTextSize(fontSize);
+    timeWidth = tft.textWidth("00:00:00", 1);
+    fieldWidth = tft.textWidth("00", 1);
+    fieldStride = tft.textWidth("00:", 1);
+    timerY = top + (bottom - top - blockHeight) / 2;
+    underlineY = timerY + tft.fontHeight(1) + 2;
+    soundY = underlineY + 2 * LH;
+}
+
 void Timer::setup() {
+    calculateLayout();
     int hours = 0;
     int minutes = 0;
     int seconds = 0;
@@ -54,6 +80,7 @@ void Timer::setup() {
 
         drawMainBorderWithTitle("Set a timer", false);
         tft.setTextSize(fontSize);
+        tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
         tft.drawCentreString(timeString, timerX, timerY, 1);
 
         // Update underline based on current setting mode
@@ -178,9 +205,10 @@ void Timer::loop() {
                 snprintf(timeString, sizeof(timeString), "%02d:%02d:%02d", hours, minutes, seconds);
 
                 // Calculate optimal font size based on display width
-                uint8_t f_size = 4;
+                uint8_t f_size = 1;
                 for (uint8_t i = 4; i > 0; i--) {
-                    if (i * LW * 8 < (tftWidth - BORDER_PAD_X * 2)) {
+                    tft.setTextSize(i);
+                    if (tft.textWidth(timeString, 1) <= (tftWidth - BORDER_PAD_X * 2)) {
                         f_size = i;
                         break;
                     }
@@ -189,7 +217,7 @@ void Timer::loop() {
                 drawMainBorder(false);
                 tft.setTextSize(f_size);
                 tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-                tft.drawCentreString(timeString, timerX, timerY, 1);
+                tft.drawCentreString(timeString, timerX, (tftHeight - tft.fontHeight(1)) / 2, 1);
 
                 lastSeconds = seconds;
             }
@@ -212,7 +240,7 @@ void Timer::playAlarmPattern() {
 
     tft.setTextSize(1);
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-    tft.drawCentreString("Press SEL or BACK to stop", timerX, timerY + (2 * LH), 1);
+    tft.drawCentreString("SEL/BACK to stop", timerX, soundY, 1);
 
     // Alarm pattern loop - continues until user stops it
     while (true) {
@@ -241,33 +269,24 @@ void Timer::clearUnderline() {
 }
 
 void Timer::underlineHours() {
-    tft.drawLine(
-        timerX - (4 * LW * fontSize),
-        underlineY,
-        timerX - (2 * LW * fontSize),
-        underlineY,
-        bruceConfig.priColor
-    );
+    underlineField(0);
 }
 
 void Timer::underlineMinutes() {
-    tft.drawLine(
-        timerX - (LW * fontSize), underlineY, timerX + (LW * fontSize), underlineY, bruceConfig.priColor
-    );
+    underlineField(1);
 }
 
 void Timer::underlineSeconds() {
-    tft.drawLine(
-        timerX + (2 * LW * fontSize),
-        underlineY,
-        timerX + (4 * LW * fontSize),
-        underlineY,
-        bruceConfig.priColor
-    );
+    underlineField(2);
+}
+
+void Timer::underlineField(int field) {
+    int left = timerX - timeWidth / 2 + field * fieldStride;
+    tft.drawLine(left, underlineY, left + fieldWidth - 1, underlineY, bruceConfig.priColor);
 }
 
 void Timer::drawSoundOption(bool highlight) {
-    int optionY = underlineY + (2 * LH); // Position below timer
+    int optionY = soundY;
 
     tft.setTextSize(1);
 
@@ -276,7 +295,7 @@ void Timer::drawSoundOption(bool highlight) {
     uint16_t statusColor = playSoundOnFinish ? TFT_GREEN : TFT_RED;
 
     // Clear the line first
-    tft.fillRect(BORDER_PAD_X, optionY, tftWidth - BORDER_PAD_X * 2, LH + 2, bruceConfig.bgColor);
+    tft.fillRect(BORDER_PAD_X, optionY, tftWidth - BORDER_PAD_X * 2, LH + 4, bruceConfig.bgColor);
 
     // Build the option text
     char optionText[32];
@@ -288,7 +307,7 @@ void Timer::drawSoundOption(bool highlight) {
     // Optional: Draw a small indicator if highlighted
     if (highlight) {
         int indicatorY = optionY + LH + 2;
-        int textWidth = strlen(optionText) * LW;
+        int textWidth = tft.textWidth(optionText, 1);
         int startX = timerX - (textWidth / 2);
         int endX = timerX + (textWidth / 2);
 
