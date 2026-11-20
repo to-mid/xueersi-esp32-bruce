@@ -21,12 +21,14 @@ int main() {
     for (int width : {128, 160, 240, 320, 480}) {
         for (int label : {48, 66, 100}) {
             for (int count = 0; count <= 6; ++count) {
-                auto layout = statusIconLayout(12 + label, width - 12, count);
+              for (int margin : {12, 48, 89}) {
+                auto layout = statusIconLayout(12 + label, width - margin, count);
                 assert(layout.count >= 0 && layout.count <= count);
                 if (layout.count) {
                     assert(layout.start >= 12 + label + 6);
-                    assert(layout.start + layout.count * 16 + (layout.count - 1) * 6 == width - 12);
+                    assert(layout.start + layout.count * 16 + (layout.count - 1) * 6 == width - margin);
                 }
+              }
             }
         }
     }

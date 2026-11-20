@@ -945,7 +945,7 @@ void drawStatusBar() {
     } else {
         statusText = "BRUCE " + String(BRUCE_VERSION);
     }
-    const int iconsRight = bat > 0 ? tftWidth - 89 : tftWidth - 12;
+    const int iconsRight = bat > 0 ? tftWidth - (tftWidth < 200 ? 48 : 89) : tftWidth - 12;
     const int labelWidth = iconsRight > 12 ? iconsRight - 12 : 0;
     while (statusText.length() && tft.textWidth(statusText, 1) > labelWidth) {
         statusText.remove(statusText.length() - 1);
@@ -1093,14 +1093,13 @@ void drawBatteryStatus(uint8_t bat) {
     if (bat < 16) barcolor = color = TFT_RED;
 
     tft.drawRoundRect(tftWidth - 42, 7, 34, 17, 2, color);
-    tft.setTextSize(FP);
-    tft.fillRect(tftWidth - 85, 7, 42, 18, bruceConfig.bgColor);
-    if (charging) {
+    // Small panels need this space for the complete time label.
+    if (tftWidth >= 200) {
+        tft.setTextSize(FP);
+        tft.fillRect(tftWidth - 85, 7, 42, 18, bruceConfig.bgColor);
         tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-        tft.drawRightString("CHG", tftWidth - 44, 12, 1);
-    } else {
-        tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-        tft.drawRightString((bat == 100 ? "" : " ") + String(bat) + "%", tftWidth - 44, 12, 1);
+        if (charging) tft.drawRightString("CHG", tftWidth - 44, 12, 1);
+        else tft.drawRightString((bat == 100 ? "" : " ") + String(bat) + "%", tftWidth - 44, 12, 1);
     }
     tft.fillRoundRect(tftWidth - 40, 9, 30 * bat / 100, 13, 2, barcolor);
     tft.drawLine(tftWidth - 30, 9, tftWidth - 30, 9 + 13, bruceConfig.bgColor);
