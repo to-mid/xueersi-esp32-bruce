@@ -122,6 +122,49 @@ int main() { WifiMenu menu; menu.configMenu(); assert(count==2001); assert(neste
 ''', encoding='utf-8')
         run(menu, 'wifi_config_depth', ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'])
 
+        usb = (ROOT / 'src/core/USBSerial/USBSerial.h').read_text(encoding='utf-8')
+        ble = (ROOT / 'src/modules/ble_api/services/BLESerialService.cpp').read_text(encoding='utf-8')
+        formatting = directory / 'formatting.cpp'
+        formatting.write_text(r'''
+#include <cassert>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdint>
+#include <string>
+std::string output;
+struct Stream {
+    void vprintf(const char* fmt, va_list args) {
+        char buffer[512]; vsnprintf(buffer,sizeof(buffer),fmt,args); output=buffer;
+    }
+};
+struct USBSerial {
+    Stream stream; Stream* out=&stream;
+''' + function(usb, 'void vprintf(').replace(' override', '') + r'''
+};
+constexpr int BUFFER_SIZE=128;
+void bleNotifyRetry(int, const uint8_t* data, size_t size) {
+    assert(size < BUFFER_SIZE); output.assign(reinterpret_cast<const char*>(data),size);
+}
+int pdMS_TO_TICKS(int i) { return i; }
+void vTaskDelay(int) {}
+struct BLESerialService { int serial_char=0; void vprintf(const char*, va_list); };
+''' + function(ble, 'void BLESerialService::vprintf(') + r'''
+template<class T> void print(T& device, const char* format, ...) {
+    va_list args; va_start(args,format); device.vprintf(format,args); va_end(args);
+}
+int main() {
+    USBSerial usb; BLESerialService ble;
+    print(usb,"Selected option %d: %s",18,"Config");
+    assert(output=="Selected option 18: Config");
+    print(ble,"Selected option %d: %s",18,"Config");
+    assert(output=="Selected option 18: Config");
+    print(ble,"%s",std::string(10000,'A').c_str());
+    assert(output==std::string(BUFFER_SIZE-1,'A'));
+    print(ble,"");
+}
+''', encoding='utf-8')
+        run(formatting, 'serial_formatting', ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'])
+
 
 if __name__ == '__main__':
     main()

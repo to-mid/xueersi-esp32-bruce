@@ -295,10 +295,11 @@ uint32_t optionsCallback(cmd *c) {
 
     if (opt >= 0 && opt < options.size()) {
         // wakeUpScreen(); // Do not wakeup screen if it is dimmed and using Remote control
-        forceMenuOption = opt;
+        const String label = options[opt].label;
         serialDevice->printf(
-            "Selected option %d: %s\n", forceMenuOption, options[forceMenuOption].label.c_str()
+            "Selected option %d: %s\n", opt, label.c_str()
         );
+        forceMenuOption = opt;
         vTaskDelay(30 / portTICK_PERIOD_MS);
         optionsList();
     } else if (options.size() > 0) {

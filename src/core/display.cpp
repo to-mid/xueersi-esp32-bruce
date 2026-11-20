@@ -730,6 +730,7 @@ int loopOptions(
                 Serial.print("Forcely ");
             }
             if (chosen >= options.size() || !options[chosen].enabled) continue;
+            index = chosen;
             Serial.println("Selected: " + String(options[chosen].label));
             // Nested menus may rebuild this vector and destroy the selected Option.
             // Keep the running callback alive until it has returned.

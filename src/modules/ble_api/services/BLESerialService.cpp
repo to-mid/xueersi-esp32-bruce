@@ -58,11 +58,14 @@ size_t BLESerialService::println(size_t n) {
 }
 
 void BLESerialService::vprintf(const char *fmt, va_list args) {
-    int size = vsnprintf(NULL, 0, fmt, args) + 1;
     char str[BUFFER_SIZE];
-    sprintf(str, fmt, args);
-
-    bleNotifyRetry(serial_char, reinterpret_cast<const uint8_t *>(str), size);
+    va_list copy;
+    va_copy(copy, args);
+    int size = vsnprintf(str, sizeof(str), fmt, copy);
+    va_end(copy);
+    if (size <= 0) return;
+    size_t length = size < sizeof(str) ? size : sizeof(str) - 1;
+    bleNotifyRetry(serial_char, reinterpret_cast<const uint8_t *>(str), length);
     vTaskDelay(pdMS_TO_TICKS(10));
 }
 
