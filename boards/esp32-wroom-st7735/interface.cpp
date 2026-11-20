@@ -29,9 +29,7 @@ void _setup_gpio() {
     }
 #endif
 
-    // This panel is NOT color-inverted by default (the firmware's generic
-    // default is inverted). Set the board default before the saved config is
-    // loaded; _post_setup_gpio() re-asserts it after loading.
+    // Board default only; a saved explicit preference is loaded afterwards.
     bruceConfig.colorInverted = 0;
 
     bruceConfig.startupApp = "Launcher";
@@ -46,18 +44,11 @@ void _post_setup_gpio() {
 #ifdef TFT_BL
     if (TFT_BL >= 0) pinMode(TFT_BL, OUTPUT);
 #endif
-    // The saved config file ("rot" field) overrides the compile-time ROTATION,
-    // so changing -DROTATION alone left this upside-down panel unchanged.
-    // Pin the runtime rotation to ROTATION after the config has been loaded
-    // and begin_tft() has run (rotation 1 <-> 3 are 180 deg apart).
-    bruceConfigPins.rotation = ROTATION;
-    tft.setRotation(ROTATION);
-
-    // begin_tft() already applied the loaded colorInverted; this panel shows
-    // inverted colours with the generic default, so pin it to non-inverted
-    // even if an old saved config said otherwise.
-    bruceConfig.colorInverted = 0;
-    tft.invertDisplay(0);
+    // Keep the final hardware orientation and the layout dimensions in sync.
+    tft.setRotation(bruceConfigPins.rotation);
+    tftWidth = tft.width();
+    tftHeight = tft.height();
+    tft.invertDisplay(bruceConfig.colorInverted);
 }
 
 /***************************************************************************************
@@ -101,6 +92,12 @@ void InputHandler(void) {
     static unsigned long tm = 0;
     static unsigned long esc_tm = 0;
     static bool esc_armed = false;
+    static bool esc_fired = false;
+    // Sample release before the debounce gate, including short release/represses.
+    if (digitalRead(L_BTN) == HIGH) {
+        esc_armed = false;
+        esc_fired = false;
+    }
     if (!(millis() - tm > 200 || LongPress)) return;
 
     bool u = digitalRead(UP_BTN);
@@ -118,26 +115,30 @@ void InputHandler(void) {
 
     // KEY_B -> BACK / ESC
     if (!b) {
+        esc_armed = false;
         EscPress = true;
         return;
     }
 
     // A + LEFT combo also works as BACK (keeps the 5-button habit)
     if (!l && !s) {
+        esc_armed = false;
+        esc_fired = true;
         EscPress = true;
         return;
     }
 
     // Long-press LEFT as BACK (like Marauder-Mini)
     if (!l) {
-        PrevPress = true;
-        if (esc_armed == false) {
+        if (!esc_fired) PrevPress = true;
+        if (!esc_armed && !esc_fired) {
             esc_tm = millis();
             esc_armed = true;
         }
     }
-    if (esc_armed && millis() - esc_tm > 1000) {
+    if (!l && esc_armed && millis() - esc_tm > 1000) {
         esc_armed = false;
+        esc_fired = true;
         esc_tm = millis();
         PrevPress = false;
         EscPress = true;

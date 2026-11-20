@@ -1,0 +1,56 @@
+name: Xueersi fixes firmware
+
+on:
+  push:
+    branches: [codex/xueersi-display-memory-fixes]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xueersi-fixes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-multilib g++ libc6-dev-i386
+          python -m pip install 'platformio>=6.1.19' requests esptool intelhex
+      - name: Regression checks
+        run: python tests/test_xueersi_regressions.py
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: xueersi-${{ runner.os }}-${{ hashFiles('platformio.ini', 'boards/esp32-wroom-st7735/*.ini') }}
+          restore-keys: |
+            xueersi-${{ runner.os }}-
+      - name: Build firmware
+        run: |
+          set -o pipefail
+          pio run -e esp32-wroom-st7735 2>&1 | tee build-xueersi.log
+      - name: Upload firmware and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xueersi-fixes-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            Bruce-esp32-wroom-st7735.bin
+            .pio/build/esp32-wroom-st7735/firmware.bin
+            .pio/build/esp32-wroom-st7735/firmware.elf
+            .pio/build/esp32-wroom-st7735/bootloader.bin
+            .pio/build/esp32-wroom-st7735/partitions.bin
+            build-xueersi.log

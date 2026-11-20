@@ -45,8 +45,9 @@
 static const uint8_t TX = 1;
 static const uint8_t RX = 3;
 
-static const uint8_t TXD2 = 17;
-static const uint8_t RXD2 = 16;
+// GPIO16/17 are reserved for the WROVER module's PSRAM.
+static const uint8_t TXD2 = 25;
+static const uint8_t RXD2 = 26;
 
 static const uint8_t SDA = 21;
 static const uint8_t SCL = 15; // I2C SCL is GPIO15 (GPIO22 is SD CS)
@@ -109,13 +110,13 @@ static const uint8_t ADC2 = 34;
 #define LED_ON HIGH
 #define LED_OFF LOW
 
-// BadUSB serial keyboard module (CH9329) - uses UART2 (TX=17, RX=16)
-#define BAD_TX 17
-#define BAD_RX 16
+// Optional serial peripherals use the exposed expansion pins, not PSRAM pins.
+#define BAD_TX 25
+#define BAD_RX 26
 
 // SERIAL (GPS) dedicated pins - UART2
-#define SERIAL_TX 17
-#define SERIAL_RX 16
+#define SERIAL_TX 25
+#define SERIAL_RX 26
 #define GPS_SERIAL_TX SERIAL_TX
 #define GPS_SERIAL_RX SERIAL_RX
 

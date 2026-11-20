@@ -44,10 +44,12 @@ String generateToken(int length = 24) {
 void stopWebUi() {
     tft.setLogging(false);
     isWebUIActive = false;
-    server->end();
-    server->~AsyncWebServer();
-    free(server);
-    server = nullptr;
+    if (server) {
+        server->end();
+        server->~AsyncWebServer();
+        free(server);
+        server = nullptr;
+    }
     if (mdnsRunning) {
         MDNS.end();
         mdnsRunning = false;
@@ -748,8 +750,7 @@ void configureWebServer() {
 void startWebUi(bool mode_ap) {
     bool keepWifiConnected = false;
     if (!WiFi.isConnected()) {
-        if (mode_ap) wifiConnectMenu(WIFI_AP);
-        else wifiConnectMenu(WIFI_STA);
+        if (!wifiConnectMenu(mode_ap ? WIFI_AP : WIFI_STA)) return;
     } else {
         keepWifiConnected = true;
     }
@@ -762,7 +763,12 @@ void startWebUi(bool mode_ap) {
 
         Serial.println("Configuring Webserver ...");
         if (psramFound()) server = (AsyncWebServer *)ps_malloc(sizeof(AsyncWebServer));
-        else server = (AsyncWebServer *)malloc(sizeof(AsyncWebServer));
+        if (!server) server = (AsyncWebServer *)malloc(sizeof(AsyncWebServer));
+        if (!server) {
+            displayError("Not enough RAM for WebUI", true);
+            if (!keepWifiConnected) wifiDisconnect();
+            return;
+        }
 
         new (server) AsyncWebServer(default_webserverporthttp);
 

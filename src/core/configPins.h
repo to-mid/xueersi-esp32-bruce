@@ -269,10 +269,10 @@ public:
 #endif
     void setSpiPins(SPIPins value);
     void setI2CPins(I2CPins value);
-    void setUARTPins(UARTPins value);
+    void setUARTPins(UARTPins &value);
     void validateSpiPins(SPIPins value);
     void validateI2CPins(I2CPins value);
-    void validateUARTPins(UARTPins value);
+    void validateUARTPins(UARTPins &value);
 
     // Screen Rotation
     void setRotation(int value);

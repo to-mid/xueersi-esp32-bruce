@@ -453,7 +453,7 @@ void BruceConfigPins::setI2CPins(I2CPins value) {
     saveFile();
 }
 
-void BruceConfigPins::setUARTPins(UARTPins value) {
+void BruceConfigPins::setUARTPins(UARTPins &value) {
     validateUARTPins(value);
     saveFile();
 }
@@ -471,9 +471,14 @@ void BruceConfigPins::validateI2CPins(I2CPins value) {
     if (value.scl < 0 || value.scl > GPIO_PIN_COUNT) value.scl = GPIO_NUM_NC;
 }
 
-void BruceConfigPins::validateUARTPins(UARTPins value) {
+void BruceConfigPins::validateUARTPins(UARTPins &value) {
     if (value.rx < 0 || value.rx > GPIO_PIN_COUNT) value.rx = GPIO_NUM_NC;
     if (value.tx < 0 || value.tx > GPIO_PIN_COUNT) value.tx = GPIO_NUM_NC;
+#ifdef ESP32_WROOM_ST7735
+    // Migrate legacy UART/GPS settings that used the module's PSRAM pins.
+    if (value.rx == GPIO_NUM_16 || value.rx == GPIO_NUM_17) value.rx = (gpio_num_t)SERIAL_RX;
+    if (value.tx == GPIO_NUM_16 || value.tx == GPIO_NUM_17) value.tx = (gpio_num_t)SERIAL_TX;
+#endif
 }
 
 void BruceConfigPins::setRotation(int value) {
@@ -483,7 +488,11 @@ void BruceConfigPins::setRotation(int value) {
 }
 
 void BruceConfigPins::validateRotationValue() {
-    if (rotation < 0 || rotation > 3) rotation = 1;
+    if (rotation < 0 || rotation > 3) rotation = ROTATION;
+#ifdef ESP32_WROOM_ST7735
+    // This small-screen UI exposes only the two landscape orientations.
+    if ((rotation & 1) == 0) rotation = ROTATION;
+#endif
 }
 
 void BruceConfigPins::setBleName(String value) {

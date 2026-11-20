@@ -43,108 +43,106 @@ bool showHiddenNetworks = false;
 
 void WifiMenu::optionsMenu() {
     returnToMenu = false;
-    options.clear();
-    // Note: WiFi features will cleanly stop WebUI automatically when they start
-    // User can navigate menu normally even with WebUI active
-    if (!WiFi.isConnected() && !WiFi.AP.started()) {
-        options = {
-            {"Connect to Wifi", lambdaHelper(wifiConnectMenu, WIFI_STA)},
-            {"Start WiFi AP", [=]() {
-                 wifiConnectMenu(WIFI_AP);
-                 displayInfo("pwd: " + bruceConfig.wifiAp.pwd, true);
-             }},
-        };
-    }
-    if (WiFi.getMode() != WIFI_MODE_NULL) { options.push_back({"Turn Off WiFi", wifiDisconnect}); }
-    if (WiFi.getMode() & WIFI_MODE_STA && WiFi.isConnected()) {
-        options.push_back({"AP info", displayAPInfo});
-    }
-    options.push_back({"Wifi Atks", wifi_atk_menu});
-    options.push_back({"Evil Portal", [=]() {
-                           // WebUI cleanup now handled automatically inside EvilPortal constructor
-                           EvilPortal();
-                       }});
-    options.push_back({"NetCut", [=]() { netcutMenu(); }});
-    // options.push_back({"ReverseShell", [=]()       { ReverseShell(); }});
+    bool showConfigAgain;
+    do {
+        showConfigAgain = false;
+        options.clear();
+        // Note: WiFi features will cleanly stop WebUI automatically when they start
+        // User can navigate menu normally even with WebUI active
+        if (!WiFi.isConnected() && !WiFi.AP.started()) {
+            options = {
+                {"Connect to Wifi", lambdaHelper(wifiConnectMenu, WIFI_STA)},
+                {"Start WiFi AP", [=]() {
+                     if (wifiConnectMenu(WIFI_AP)) displayInfo("pwd: " + bruceConfig.wifiAp.pwd, true);
+                 }},
+            };
+        }
+        if (WiFi.getMode() != WIFI_MODE_NULL) { options.push_back({"Turn Off WiFi", wifiDisconnect}); }
+        if (WiFi.getMode() & WIFI_MODE_STA && WiFi.isConnected()) {
+            options.push_back({"AP info", displayAPInfo});
+        }
+        options.push_back({"Wifi Atks", wifi_atk_menu});
+        options.push_back({"Evil Portal", [=]() {
+                               // WebUI cleanup now handled automatically inside EvilPortal constructor
+                               EvilPortal();
+                           }});
+        options.push_back({"NetCut", [=]() { netcutMenu(); }});
+        // options.push_back({"ReverseShell", [=]()       { ReverseShell(); }});
 #ifndef LITE_VERSION
-    options.push_back({"Listen TCP", listenTcpPort});
-    options.push_back({"Client TCP", clientTCP});
-    options.push_back({"SOCKS4 Proxy", []() { socks4Proxy(1080); }});
-    options.push_back({"TelNET", telnet_setup});
-    options.push_back({"SSH", lambdaHelper(ssh_setup, String(""))});
-    options.push_back({"Sniffer", sniffer_setup});
-    options.push_back({"Channel Analyzer", channel_analyzer_setup});
-    options.push_back({"Jam Detect", jam_detect_setup});
-    options.push_back({"Scan Hosts", [=]() {
-                           bool doScan = true;
-                           if (!WiFi.isConnected()) doScan = wifiConnectMenu();
+        options.push_back({"Listen TCP", listenTcpPort});
+        options.push_back({"Client TCP", clientTCP});
+        options.push_back({"SOCKS4 Proxy", []() { socks4Proxy(1080); }});
+        options.push_back({"TelNET", telnet_setup});
+        options.push_back({"SSH", lambdaHelper(ssh_setup, String(""))});
+        options.push_back({"Sniffer", sniffer_setup});
+        options.push_back({"Channel Analyzer", channel_analyzer_setup});
+        options.push_back({"Jam Detect", jam_detect_setup});
+        options.push_back({"Scan Hosts", [=]() {
+                               bool doScan = true;
+                               if (!WiFi.isConnected()) doScan = wifiConnectMenu();
 
-                           if (doScan) {
-                               esp_netif_t *esp_netinterface =
-                                   esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-                               if (esp_netinterface == nullptr) {
-                                   Serial.println("Failed to get netif handle");
-                                   return;
+                               if (doScan) {
+                                   esp_netif_t *esp_netinterface =
+                                       esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                                   if (esp_netinterface == nullptr) {
+                                       Serial.println("Failed to get netif handle");
+                                       return;
+                                   }
+                                   ARPScanner{esp_netinterface};
                                }
-                               ARPScanner{esp_netinterface};
-                           }
-                       }});
-    options.push_back({"Wireguard", wg_setup});
-    options.push_back({"Responder", responder});
-    options.push_back({"Brucegotchi", brucegotchi_start});
-    options.push_back({"WiFi Pass Recovery", wifi_recover_menu});
+                           }});
+        options.push_back({"Wireguard", wg_setup});
+        options.push_back({"Responder", responder});
+        options.push_back({"Brucegotchi", brucegotchi_start});
+        options.push_back({"WiFi Pass Recovery", wifi_recover_menu});
 #endif
 
-    options.push_back({"Config", [this]() { configMenu(); }});
+        options.push_back({"Config", [this, &showConfigAgain]() {
+                               configMenu();
+                               showConfigAgain = !returnToMenu;
+                           }});
 
-    addOptionToMainMenu();
+        addOptionToMainMenu();
 
-    loopOptions(options, MENU_TYPE_SUBMENU, "WiFi");
+        loopOptions(options, MENU_TYPE_SUBMENU, "WiFi");
 
-    options.clear();
+        options.clear();
+    } while (showConfigAgain);
 }
 
 void WifiMenu::configMenu() {
-    std::vector<Option> wifiOptions;
-
-    wifiOptions.push_back({"Change MAC", wifiMACMenu});
-    wifiOptions.push_back({"Add Evil Wifi", addEvilWifiMenu});
-    wifiOptions.push_back({"Remove Evil Wifi", removeEvilWifiMenu});
-    wifiOptions.push_back({bruceConfig.TerminalLog ? "SSH/Telnet Log OFF" : "SSH/Telnet Log ON", [this]() {
-                               bruceConfig.setTerminalLog(!bruceConfig.TerminalLog);
-                               configMenu();
-                           }});
-
-    // Evil Wifi Settings submenu (unchanged)
-    wifiOptions.push_back({"Evil Wifi Settings", [this]() {
-                               std::vector<Option> evilOptions;
-
-                               evilOptions.push_back({"Set Gateway IP", setEvilGatewayIp});
-                               evilOptions.push_back({"Password Mode", setEvilPasswordMode});
-                               evilOptions.push_back({"Rename /creds", setEvilEndpointCreds});
-                               evilOptions.push_back({"Allow /creds access", setEvilAllowGetCreds});
-                               evilOptions.push_back({"Rename /ssid", setEvilEndpointSsid});
-                               evilOptions.push_back({"Allow /ssid access", setEvilAllowSetSsid});
-                               evilOptions.push_back({"Display endpoints", setEvilAllowEndpointDisplay});
-                               evilOptions.push_back({"Back", [this]() { configMenu(); }});
-                               loopOptions(evilOptions, MENU_TYPE_SUBMENU, "Evil Wifi Settings");
-                           }});
-
-    {
-
-        String hidden__wifi_option = String("Hidden Networks:") + (showHiddenNetworks ? "ON" : "OFF");
-
-        // construct Option explicitly using char* label
-        Option opt(hidden__wifi_option.c_str(), [this]() {
-            showHiddenNetworks = !showHiddenNetworks;
-            displayInfo(String("Hidden Networks:") + (showHiddenNetworks ? "ON" : "OFF"), true);
-            configMenu();
-        });
-
-        wifiOptions.push_back(opt);
+    while (!returnToMenu) {
+        std::vector<Option> wifiOptions;
+        wifiOptions.push_back({"Change MAC", wifiMACMenu});
+        wifiOptions.push_back({"Add Evil Wifi", addEvilWifiMenu});
+        wifiOptions.push_back({"Remove Evil Wifi", removeEvilWifiMenu});
+        wifiOptions.push_back({bruceConfig.TerminalLog ? "SSH/Telnet Log OFF" : "SSH/Telnet Log ON", []() {
+                                   bruceConfig.setTerminalLog(!bruceConfig.TerminalLog);
+                               }});
+        wifiOptions.push_back({"Evil Wifi Settings", []() {
+                                   while (!returnToMenu) {
+                                       std::vector<Option> evilOptions = {
+                                           {"Set Gateway IP", setEvilGatewayIp},
+                                           {"Password Mode", setEvilPasswordMode},
+                                           {"Rename /creds", setEvilEndpointCreds},
+                                           {"Allow /creds access", setEvilAllowGetCreds},
+                                           {"Rename /ssid", setEvilEndpointSsid},
+                                           {"Allow /ssid access", setEvilAllowSetSsid},
+                                           {"Display endpoints", setEvilAllowEndpointDisplay},
+                                           {"Back", []() {}}
+                                       };
+                                       int selected = loopOptions(evilOptions, MENU_TYPE_SUBMENU, "Evil Wifi Settings");
+                                       if (selected < 0 || selected == (int)evilOptions.size() - 1) break;
+                                   }
+                               }});
+        wifiOptions.push_back({String("Hidden Networks:") + (showHiddenNetworks ? "ON" : "OFF"), []() {
+                                   showHiddenNetworks = !showHiddenNetworks;
+                                   displayInfo(String("Hidden Networks:") + (showHiddenNetworks ? "ON" : "OFF"), true);
+                               }});
+        wifiOptions.push_back({"Back", []() {}});
+        int selected = loopOptions(wifiOptions, MENU_TYPE_SUBMENU, "WiFi Config");
+        if (selected < 0 || selected == (int)wifiOptions.size() - 1) break;
     }
-    wifiOptions.push_back({"Back", [this]() { optionsMenu(); }});
-    loopOptions(wifiOptions, MENU_TYPE_SUBMENU, "WiFi Config");
 }
 
 void WifiMenu::drawIcon(float scale) {

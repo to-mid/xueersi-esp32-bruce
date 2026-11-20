@@ -141,8 +141,12 @@ bool _connectToWifiNetwork(const String &ssid, const String &pwd) {
 
 bool _setupAP() {
     IPAddress AP_GATEWAY(172, 0, 0, 1);
-    WiFi.softAPConfig(AP_GATEWAY, AP_GATEWAY, IPAddress(255, 255, 255, 0));
-    WiFi.softAP(bruceConfig.wifiAp.ssid, bruceConfig.wifiAp.pwd, 6, 0, 4, false);
+    if (!WiFi.softAPConfig(AP_GATEWAY, AP_GATEWAY, IPAddress(255, 255, 255, 0)) ||
+        !WiFi.softAP(bruceConfig.wifiAp.ssid, bruceConfig.wifiAp.pwd, 6, 0, 4, false)) {
+        displayError("Failed to start WiFi AP", true);
+        wifiDisconnect();
+        return false;
+    }
     wifiIP = WiFi.softAPIP().toString(); // update global var
     Serial.println("IP: " + wifiIP);
     wifiConnected = true;
@@ -187,7 +191,15 @@ bool wifiConnectMenu(wifi_mode_t mode) {
 
     switch (mode) {
         case WIFI_AP: // access point
-            WiFi.mode(WIFI_AP);
+            if (!radioHasMemForWifi()) {
+                displayError("Low RAM: free BLE/SD first", true);
+                return false;
+            }
+            if (!WiFi.mode(WIFI_AP)) {
+                displayError("Failed to initialize WiFi", true);
+                wifiDisconnect();
+                return false;
+            }
             return _setupAP();
             break;
 
@@ -197,7 +209,11 @@ bool wifiConnectMenu(wifi_mode_t mode) {
                 displayError("Low RAM: free BLE/SD first", true);
                 return false;
             }
-            WiFi.mode(WIFI_MODE_STA);
+            if (!WiFi.mode(WIFI_MODE_STA)) {
+                displayError("Failed to initialize WiFi", true);
+                wifiDisconnect();
+                return false;
+            }
 
             // wifiMACMenu();
             applyConfiguredMAC();

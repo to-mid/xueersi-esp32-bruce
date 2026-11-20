@@ -366,7 +366,8 @@ void setCustomUIColorSettingMenu(
         return false;
     };
 
-    static uint16_t colorStorage[32];
+    // Green includes 0 and every odd value through 63: 33 entries.
+    static uint16_t colorStorage[33];
     int selectedIndex = 0;
     int i = 0;
     int index = 0;
@@ -1002,15 +1003,17 @@ void runClockLoop(bool showMenuHint) {
                 tftHeight - 2 * BORDER_PAD_X,
                 bruceConfig.priColor
             );
-            uint8_t f_size = 4;
+            uint8_t f_size = 1;
             for (uint8_t i = 4; i > 0; i--) {
-                if (i * LW * strlen(timeStr) < (tftWidth - BORDER_PAD_X * 2)) {
+                tft.setTextSize(i);
+                if (tft.textWidth(timeStr, 1) <= (tftWidth - BORDER_PAD_X * 2) &&
+                    tft.fontHeight(1) <= (tftHeight - BORDER_PAD_X * 2)) {
                     f_size = i;
                     break;
                 }
             }
             tft.setTextSize(f_size);
-            tft.drawCentreString(timeStr, tftWidth / 2, tftHeight / 2 - 13, 1);
+            tft.drawCentreString(timeStr, tftWidth / 2, (tftHeight - tft.fontHeight(1)) / 2, 1);
 
             // "OK to show menu" hint management
             if (hintVisible && (millis() - hintStartTime < 5000)) {

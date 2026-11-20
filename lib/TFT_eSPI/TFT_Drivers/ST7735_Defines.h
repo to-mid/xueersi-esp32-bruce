@@ -140,6 +140,17 @@
 #define TFT_MAD_MH  0x04
 #define TFT_MAD_RGB 0x00
 
+// Preserve each tab's default unless the board explicitly selects a color order.
+#ifdef TFT_RGB_ORDER
+  #if TFT_RGB_ORDER == TFT_RGB
+    #define ST7735_MAD_COLOR(default_order) TFT_MAD_RGB
+  #else
+    #define ST7735_MAD_COLOR(default_order) TFT_MAD_BGR
+  #endif
+#else
+  #define ST7735_MAD_COLOR(default_order) default_order
+#endif
+
 #define TFT_INVOFF 0x20
 #define TFT_INVON  0x21
 

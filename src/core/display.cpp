@@ -3,6 +3,7 @@
 #include "core/wifi/wg.h"           //for isConnectedWireguard to print wireguard lock
 #include "mykeyboard.h"
 #include "settings.h" //for timeStr
+#include "status_layout.h"
 #include "utils.h"
 #include <JPEGDecoder.h>
 #include <interface.h> //for charging ischarging to print charging indicator
@@ -730,7 +731,10 @@ int loopOptions(
             }
             if (chosen >= options.size() || !options[chosen].enabled) continue;
             Serial.println("Selected: " + String(options[chosen].label));
-            options[chosen].operation();
+            // Nested menus may rebuild this vector and destroy the selected Option.
+            // Keep the running callback alive until it has returned.
+            auto operation = options[chosen].operation;
+            operation();
             break;
         }
         // interpreter_start -> running the interpreter
@@ -920,6 +924,8 @@ void drawSubmenu(int index, std::vector<Option> &options, const char *title) {
 
 void drawStatusBar() {
     uint8_t bat = getBattery();
+    // Clear stale text/icons once, without overwriting the border at y=25.
+    tft.fillRect(7, 7, tftWidth - 14, 18, bruceConfig.bgColor);
     if (bat > 0) drawBatteryStatus(bat);
 
     if (bruceConfig.theme.border) {
@@ -927,19 +933,25 @@ void drawStatusBar() {
         tft.drawLine(5, 25, tftWidth - 6, 25, bruceConfig.priColor);
     }
 
+    setTftDisplay(12, 12, bruceConfig.priColor, 1, bruceConfig.bgColor);
+    String statusText;
     if (clock_set) {
-        setTftDisplay(12, 12, bruceConfig.priColor, 1, bruceConfig.bgColor);
-        tft.fillRect(12, 12, 60, LH, bruceConfig.bgColor);
 #if defined(HAS_RTC)
         updateTimeStr(_rtc.getTimeStruct());
 #else
         updateTimeStr(rtc.getTimeStruct());
 #endif
-        tft.print(timeStr);
+        statusText = timeStr;
     } else {
-        setTftDisplay(12, 12, bruceConfig.priColor, 1, bruceConfig.bgColor);
-        tft.print("BRUCE " + String(BRUCE_VERSION));
+        statusText = "BRUCE " + String(BRUCE_VERSION);
     }
+    const int iconsRight = bat > 0 ? tftWidth - 89 : tftWidth - 12;
+    const int labelWidth = iconsRight > 12 ? iconsRight - 12 : 0;
+    while (statusText.length() && tft.textWidth(statusText, 1) > labelWidth) {
+        statusText.remove(statusText.length() - 1);
+    }
+    tft.print(statusText);
+    const int labelEnd = 12 + tft.textWidth(statusText, 1);
 
     int iconCount = 0;
     bool showSD = sdcardMounted;
@@ -959,42 +971,42 @@ void drawStatusBar() {
         const int IW = 16;
         const int IH = 16;
         const int GAP = 6;
-        int totalW = iconCount * IW + (iconCount - 1) * GAP;
-        int sx = (tftWidth - totalW) / 2;
+        const auto layout = statusIconLayout(labelEnd, iconsRight, iconCount);
+        int sx = layout.start;
         int iy = 7;
         int idx = 0;
 
-        if (showSD) {
+        if (showSD && idx < layout.count) {
             int x = sx + idx * (IW + GAP);
             tft.fillRect(x, iy, IW, IH, bruceConfig.bgColor);
             drawSdSmall(x, iy);
             idx++;
         }
-        if (showGPS) {
+        if (showGPS && idx < layout.count) {
             int x = sx + idx * (IW + GAP);
             tft.fillRect(x, iy, IW, IH, bruceConfig.bgColor);
             drawGpsSmall(x, iy);
             idx++;
         }
-        if (showWifi) {
+        if (showWifi && idx < layout.count) {
             int x = sx + idx * (IW + GAP);
             tft.fillRect(x, iy, IW, IH, bruceConfig.bgColor);
             drawWifiSmall(x, iy);
             idx++;
         }
-        if (showWeb) {
+        if (showWeb && idx < layout.count) {
             int x = sx + idx * (IW + GAP);
             tft.fillRect(x, iy, IW, IH, bruceConfig.bgColor);
             drawWebUISmall(x, iy);
             idx++;
         }
-        if (showBLE) {
+        if (showBLE && idx < layout.count) {
             int x = sx + idx * (IW + GAP);
             tft.fillRect(x, iy, IW, IH, bruceConfig.bgColor);
             drawBLESmall(x, iy);
             idx++;
         }
-        if (showWG) {
+        if (showWG && idx < layout.count) {
             int x = sx + idx * (IW + GAP);
             tft.fillRect(x, iy, IW, IH, bruceConfig.bgColor);
             drawWireguardStatus(x, iy);
