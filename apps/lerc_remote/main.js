@@ -172,6 +172,18 @@ function targetsOf(cfg, pkt) {
   return [];
 }
 
+/* 帧里的包序号（PackId）。真遥控器是整机一个计数器：每发一包 +1，且不因为
+ * 换了按键/重进菜单就回到起点。这里用模块级变量保存，脚本运行期间一直递增，
+ * 只有退出脚本（重新进 main）才会重置。 */
+var PACK_ID = -1;
+
+function initPackId(cfg) {
+  if (PACK_ID >= 0) return;
+  var v = parseInt(cfgGet(cfg, "startPackId", now() & 0xFF), 10);
+  if (isNaN(v)) v = 0;
+  PACK_ID = v & 0xFF;
+}
+
 /* 发送界面：按住 A 连发，B 返回 */
 function runPacket(cfg, pkt) {
   var targets = targetsOf(cfg, pkt);
@@ -189,9 +201,8 @@ function runPacket(cfg, pkt) {
   var params = hexBytes(cfgGet(pkt, "params", ""));
   var name = String(cfgGet(pkt, "name", "包"));
 
-  var packId = parseInt(cfgGet(cfg, "startPackId", now() & 0xFF), 10);
-  if (isNaN(packId)) packId = 0;
-  packId = packId & 0xFF;
+  initPackId(cfg);
+  var packId = PACK_ID;
 
   var sent = 0;
   var targetIndex = 0;
@@ -241,7 +252,8 @@ function runPacket(cfg, pkt) {
         row(72, "SENT " + sent + "  PID " + bytesToHex([packId]), C_ACC);
         row(84, "ADV " + bytesToHex(adv, " "), C_DIM);
 
-        packId = (packId + 1) & 0xFF;
+        PACK_ID = (packId + 1) & 0xFF;
+        packId = PACK_ID;
         targetIndex = (targetIndex + 1) % targets.length;
       }
     } else if (advertising) {

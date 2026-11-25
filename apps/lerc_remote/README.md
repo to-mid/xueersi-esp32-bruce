@@ -56,7 +56,7 @@
 | `remoteId` | 只发一个目标时可以用它代替 `targets` |
 | `deviceType` | 帧里的 RType，默认 `FE` |
 | `group` | 帧里的 LampID（组 ID），默认 `00` |
-| `startPackId` | 包 ID 起始值，不写就用开机毫秒数低 8 位 |
+| `startPackId` | 包序号起始值，不写就用开机毫秒数低 8 位。之后脚本运行期间一直自增（换包、退出再进都不重置），只有重新进脚本才回到起点 |
 | `packets[].name` | 菜单里显示的名字 |
 | `packets[].cmd` | 命令字，见 `catalog.json`，如 `00` 开灯、`02` 亮度+、`FE` 测试模式 |
 | `packets[].params` | 参数字节，十六进制，最多 9 字节；没有参数就写 `""` |
