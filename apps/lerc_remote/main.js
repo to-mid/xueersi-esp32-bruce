@@ -1,7 +1,7 @@
 /*
  * 乐式 RF 遥控包发射器 —— Bruce BJS 扩展应用（不需要插 SD 卡）
  *
- * 放到设备 LittleFS：/scripts/lerc_remote/main.js
+ * 放到设备 LittleFS：/BruceJS/lerc_remote/main.js
  * 同目录放 packets.json 定义自己的包列表（格式见 README.md）
  * 菜单路径：主菜单 -> Scripts -> lerc_remote -> main
  *
@@ -12,13 +12,12 @@
  */
 
 var display = require('display');
-var keyboard = require('keyboard');
 var dialog = require('dialog');
 var gpio = require('gpio');
 var ble = require('ble');
 var storage = require('storage');
 
-var DIR = (typeof __dirpath === 'string' && __dirpath.length > 0) ? __dirpath : '/scripts/lerc_remote';
+var DIR = (typeof __dirpath === 'string' && __dirpath.length > 0) ? __dirpath : '/BruceJS/lerc_remote';
 var CONFIG_PATH = DIR + '/packets.json';
 
 var W = display.width();
@@ -51,7 +50,9 @@ function hexClean(s) {
   for (i = 0; i < s.length; i++) {
     ch = s.charAt(i);
     if (HEX_CHARS.indexOf(ch) >= 0 || "abcdef".indexOf(ch) >= 0) out += ch;
+    else if (" \t\r\n:-".indexOf(ch) < 0) throw new Error("Invalid hex: " + s);
   }
+  if (out.length % 2 !== 0) throw new Error("Odd hex length: " + s);
   return out;
 }
 
@@ -78,9 +79,13 @@ function bytesToHex(arr, sep) {
 }
 
 function oneByte(s, dflt) {
-  if (typeof s === "number") return s & 0xFF;
+  if (typeof s === "number") {
+    if (!isFinite(s) || s !== Math.floor(s) || s < 0 || s > 255) throw new Error("Byte outside 0..255");
+    return s;
+  }
   var b = hexBytes(s);
   if (b.length === 0) return dflt;
+  if (b.length !== 1) throw new Error("Expected one byte: " + s);
   return b[0];
 }
 
@@ -124,7 +129,7 @@ function cfgGet(obj, key, dflt) {
 function loadConfig() {
   var raw = null;
   try {
-    raw = storage.read(CONFIG_PATH);
+    raw = storage.read({fs: 'littlefs', path: CONFIG_PATH});
   } catch (e) {
     raw = null;
   }
@@ -149,6 +154,7 @@ function row(y, text, color, size) {
   if (size === undefined) size = 1;
   display.drawFillRect(0, y, W, 8 * size + 2, C_BG);
   display.setTextSize(size);
+  display.setTextAlign('left', 'top');
   display.setTextColor(color);
   display.drawString(fit(text, size), 2, y);
 }
@@ -156,7 +162,7 @@ function row(y, text, color, size) {
 function asList(v) {
   if (v === null || v === undefined) return null;
   if (typeof v === "string") return [v];
-  if (v.length === undefined || v.length === 0) return null;
+  if (!Array.isArray(v) || v.length === 0) throw new Error("targets must be a nonempty list");
   return v;
 }
 
@@ -172,6 +178,39 @@ function targetsOf(cfg, pkt) {
   return [];
 }
 
+function preparePacket(cfg, pkt) {
+  if (!pkt || typeof pkt !== 'object' || Array.isArray(pkt)) throw new Error("Packet must be an object");
+  var targets = targetsOf(cfg, pkt);
+  if (targets.length === 0) throw new Error("Missing targets/remoteId");
+  for (var i = 0; i < targets.length; i++) {
+    if (typeof targets[i] !== 'string' || hexBytes(targets[i]).length !== 4) throw new Error("ID must be 4 bytes");
+  }
+  var interval = Number(cfgGet(pkt, 'intervalMs', cfgGet(cfg, 'intervalMs', 100)));
+  var advInterval = Number(cfgGet(pkt, 'advIntervalMs', cfgGet(cfg, 'advIntervalMs', 20)));
+  if (!isFinite(interval) || interval < 20 || interval > 60000 || interval !== Math.floor(interval)) throw new Error("intervalMs: 20..60000");
+  if (!isFinite(advInterval) || advInterval < 20 || advInterval > 10240 || advInterval !== Math.floor(advInterval)) throw new Error("advIntervalMs: 20..10240");
+  var paramText = cfgGet(pkt, 'params', '');
+  if (typeof paramText !== 'string') throw new Error("params must be hex text");
+  var params = hexBytes(paramText);
+  if (params.length > 9) throw new Error("Params: at most 9 bytes");
+  if (pkt.cmd === undefined || pkt.cmd === null || pkt.cmd === '') throw new Error("Missing cmd");
+  return {
+    targets: targets, interval: interval, advInterval: advInterval, params: params,
+    deviceType: oneByte(cfgGet(pkt, 'deviceType', cfgGet(cfg, 'deviceType', 'FE')), 0xFE),
+    group: oneByte(cfgGet(pkt, 'group', cfgGet(cfg, 'group', '00')), 0),
+    cmd: oneByte(pkt.cmd, 0), name: String(cfgGet(pkt, 'name', 'Packet'))
+  };
+}
+
+function validateConfig(cfg) {
+  if (!cfg || !Array.isArray(cfg.packets) || cfg.packets.length === 0) throw new Error("Empty packets list");
+  if (cfg.startPackId !== undefined) oneByte(cfg.startPackId, 0);
+  for (var i = 0; i < cfg.packets.length; i++) {
+    try { preparePacket(cfg, cfg.packets[i]); }
+    catch (e) { throw new Error("Packet " + (i + 1) + ": " + e.message); }
+  }
+}
+
 /* 帧里的包序号（PackId）。真遥控器是整机一个计数器：每发一包 +1，且不因为
  * 换了按键/重进菜单就回到起点。这里用模块级变量保存，脚本运行期间一直递增，
  * 只有退出脚本（重新进 main）才会重置。 */
@@ -179,27 +218,16 @@ var PACK_ID = -1;
 
 function initPackId(cfg) {
   if (PACK_ID >= 0) return;
-  var v = parseInt(cfgGet(cfg, "startPackId", now() & 0xFF), 10);
-  if (isNaN(v)) v = 0;
+  var v = oneByte(cfgGet(cfg, "startPackId", now() & 0xFF), 0);
   PACK_ID = v & 0xFF;
 }
 
 /* 发送界面：按住 A 连发，B 返回 */
 function runPacket(cfg, pkt) {
-  var targets = targetsOf(cfg, pkt);
-  if (targets.length === 0) {
-    dialog.error("packets.json 里没有 targets/remoteId");
-    return;
-  }
-
-  var interval = parseInt(cfgGet(pkt, "intervalMs", cfgGet(cfg, "intervalMs", 100)), 10);
-  if (isNaN(interval) || interval < 20) interval = 20;
-
-  var deviceType = oneByte(cfgGet(pkt, "deviceType", cfgGet(cfg, "deviceType", "FE")), 0xFE);
-  var group = oneByte(cfgGet(pkt, "group", cfgGet(cfg, "group", "00")), 0x00);
-  var cmd = oneByte(cfgGet(pkt, "cmd", "00"), 0x00);
-  var params = hexBytes(cfgGet(pkt, "params", ""));
-  var name = String(cfgGet(pkt, "name", "包"));
+  var prepared = preparePacket(cfg, pkt);
+  var targets = prepared.targets, interval = prepared.interval;
+  var deviceType = prepared.deviceType, group = prepared.group, cmd = prepared.cmd;
+  var params = prepared.params, name = prepared.name;
 
   initPackId(cfg);
   var packId = PACK_ID;
@@ -215,11 +243,19 @@ function runPacket(cfg, pkt) {
 
   display.fill(C_BG);
   row(2, name, C_ACC, 2);
-  row(22, "A 键按住连发  B 返回", C_DIM);
+  row(22, "Hold A: TX   B: Back", C_DIM);
   row(34, "TGT " + targets[0], C_FG);
   row(46, "CMD " + bytesToHex([cmd]) + "  DT " + bytesToHex([deviceType]) + "  G " + bytesToHex([group]), C_FG);
   row(58, "PARAM " + (params.length === 0 ? "-" : bytesToHex(params, " ")), C_FG);
 
+  row(72, "Release A to arm", C_DIM);
+  while (gpio.digitalRead(KEY_A) === 0) {
+    if (gpio.digitalRead(KEY_B) === 0) return;
+    delay(5);
+  }
+  delay(25);
+  row(72, "READY - hold A", C_ACC);
+  try {
   while (true) {
     // B 键直接读电平取按下沿：不调用 check()，免得反复挂起 Bruce 的按键扫描任务
     var bNow = gpio.digitalRead(KEY_B);
@@ -240,7 +276,7 @@ function runPacket(cfg, pkt) {
           break;
         }
         var hex = bytesToHex(adv);
-        if (!ble.rawAdv(hex, interval)) {
+        if (!ble.rawAdv(hex, prepared.advInterval)) {
           dialog.error("BLE 广播启动失败");
           break;
         }
@@ -259,29 +295,34 @@ function runPacket(cfg, pkt) {
     } else if (advertising) {
       ble.rawAdvStop();
       advertising = false;
-      row(72, "SENT " + sent + "  (已停止)", C_DIM);
+      row(72, "SENT " + sent + "  STOPPED", C_DIM);
     }
 
     delay(5);
   }
-
-  if (advertising) ble.rawAdvStop();
-  // 清掉按键任务里可能残留的 SelPress/EscPress，避免退出后菜单自己跳一下
-  keyboard.getSelPress();
-  keyboard.getEscPress();
+  } finally {
+    ble.rawAdvStop();
+  }
 }
 
 function main() {
-  var cfg = loadConfig();
-  if (cfg === null) {
-    dialog.error("读取失败：" + CONFIG_PATH);
+  if (typeof ble.rawAdv !== 'function') {
+    dialog.error("Update firmware: missing ble.rawAdv", true);
     return;
   }
+  var cfg = loadConfig();
+  if (cfg === null) {
+    dialog.error("Cannot read packets.json", true);
+    return;
+  }
+  try { validateConfig(cfg); }
+  catch (configError) { dialog.error(configError.message, true); return; }
   var packets = cfgGet(cfg, "packets", []);
   if (packets.length === 0) {
     dialog.error("packets.json 里没有任何包");
     return;
   }
+  console.log("LERC_READY packets=" + packets.length + " fs=littlefs");
 
   while (true) {
     var list = [];
@@ -293,26 +334,33 @@ function main() {
       if (tail !== "") label += " [" + tail + "]";
       list.push([label, String(i)]);
     }
-    list.push(["-- 重新读取 packets.json", "reload"]);
-    list.push(["-- 退出", "exit"]);
+    list.push(["-- Reload packets.json", "reload"]);
+    list.push(["-- Exit", "exit"]);
 
     var pick = dialog.choice(list);
     if (pick === "" || pick === "exit") break;
     if (pick === "reload") {
       var again = loadConfig();
       if (again !== null) {
-        cfg = again;
-        packets = cfgGet(cfg, "packets", []);
+        try {
+          validateConfig(again);
+          cfg = again;
+          packets = cfg.packets;
+        } catch (reloadError) { dialog.error(reloadError.message, true); }
+      } else {
+        dialog.error("Cannot read packets.json", true);
       }
       continue;
     }
     var index = parseInt(pick, 10);
     if (isNaN(index) || index < 0 || index >= packets.length) continue;
-    runPacket(cfg, packets[index]);
+    try { runPacket(cfg, packets[index]); }
+    catch (sendError) { ble.rawAdvStop(); dialog.error(sendError.message, true); }
   }
 
   ble.rawAdvStop();
   display.fill(C_BG);
 }
 
-main();
+try { main(); }
+finally { ble.rawAdvStop(); }

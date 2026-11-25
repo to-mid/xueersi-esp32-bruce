@@ -1,50 +1,159 @@
 {
   "intervalMs": 100,
-  "targets": ["6012BAF1", "FFFFFFFF"],
+  "targets": [
+    "6012BAF1",
+    "FFFFFFFF"
+  ],
   "deviceType": "FE",
   "group": "00",
-
   "_说明": "targets 写多个时会像产测脚本那样轮流发；只发一个就只留一项。packets 里每一项都可以再写 remoteId/targets/group/deviceType/intervalMs 覆盖上面的默认值。params 最多 9 字节。",
-
   "packets": [
-    { "name": "产测 进入测试模式", "cmd": "FE", "params": "01AAAA" },
-    { "name": "退出测试模式", "cmd": "FE", "params": "00" },
-
-    { "name": "开灯", "cmd": "00", "params": "01" },
-    { "name": "关灯", "cmd": "00", "params": "00" },
-    { "name": "开关切换", "cmd": "00", "params": "02" },
-    { "name": "一键关灯", "cmd": "01", "params": "" },
-
-    { "name": "亮度+", "cmd": "02", "params": "" },
-    { "name": "亮度-", "cmd": "03", "params": "" },
-    { "name": "颜色+", "cmd": "04", "params": "" },
-    { "name": "颜色-", "cmd": "05", "params": "" },
-    { "name": "调光调色停止", "cmd": "0A", "params": "" },
-
-    { "name": "亮度设置 50%", "cmd": "08", "params": "0080" },
-    { "name": "亮度设置 100%", "cmd": "08", "params": "00FF" },
-    { "name": "色温 中性光", "cmd": "0C", "params": "00" },
-    { "name": "色温 冷光", "cmd": "0C", "params": "01" },
-    { "name": "色温 暖光", "cmd": "0C", "params": "02" },
-
-    { "name": "RGB 红", "cmd": "16", "params": "FF0000" },
-    { "name": "RGB 绿", "cmd": "16", "params": "00FF00" },
-    { "name": "RGB 蓝", "cmd": "16", "params": "0000FF" },
-    { "name": "RGB 白", "cmd": "16", "params": "FFFFFF" },
-
-    { "name": "情景1 开", "cmd": "0E", "params": "0001" },
-    { "name": "情景1 关", "cmd": "0E", "params": "0000" },
-    { "name": "情景2 开", "cmd": "0E", "params": "0101" },
-    { "name": "保存情景1", "cmd": "8E", "params": "00" },
-
-    { "name": "2.4G 对码", "cmd": "27", "params": "01" },
-    { "name": "2.4G 清码", "cmd": "27", "params": "02" },
-
-    { "name": "允许对码", "cmd": "F2", "params": "" },
-    { "name": "禁止对码", "cmd": "F0", "params": "" },
-    { "name": "删除绑定", "cmd": "FA", "params": "" },
-
-    { "name": "用户自定义 键1 按下", "cmd": "3A", "params": "0100AA" },
-    { "name": "用户自定义 键1 松开", "cmd": "3A", "params": "0101AA" }
-  ]
+    {
+      "name": "Production test",
+      "cmd": "FE",
+      "params": "01AAAA"
+    },
+    {
+      "name": "Light ON",
+      "cmd": "00",
+      "params": "01"
+    },
+    {
+      "name": "Light OFF",
+      "cmd": "00",
+      "params": "00"
+    },
+    {
+      "name": "Light toggle",
+      "cmd": "00",
+      "params": "02"
+    },
+    {
+      "name": "OFF command",
+      "cmd": "01",
+      "params": ""
+    },
+    {
+      "name": "Brightness +",
+      "cmd": "02",
+      "params": ""
+    },
+    {
+      "name": "Brightness -",
+      "cmd": "03",
+      "params": ""
+    },
+    {
+      "name": "Color +",
+      "cmd": "04",
+      "params": ""
+    },
+    {
+      "name": "Color -",
+      "cmd": "05",
+      "params": ""
+    },
+    {
+      "name": "Dimming STOP",
+      "cmd": "0A",
+      "params": ""
+    },
+    {
+      "name": "Brightness 0x0080",
+      "cmd": "08",
+      "params": "0080"
+    },
+    {
+      "name": "Brightness 0x00FF",
+      "cmd": "08",
+      "params": "00FF"
+    },
+    {
+      "name": "Neutral white",
+      "cmd": "0C",
+      "params": "00"
+    },
+    {
+      "name": "Cool white",
+      "cmd": "0C",
+      "params": "01"
+    },
+    {
+      "name": "Warm white",
+      "cmd": "0C",
+      "params": "02"
+    },
+    {
+      "name": "RGB red",
+      "cmd": "16",
+      "params": "FF0000"
+    },
+    {
+      "name": "RGB green",
+      "cmd": "16",
+      "params": "00FF00"
+    },
+    {
+      "name": "RGB blue",
+      "cmd": "16",
+      "params": "0000FF"
+    },
+    {
+      "name": "RGB white",
+      "cmd": "16",
+      "params": "FFFFFF"
+    },
+    {
+      "name": "Scene 1 ON",
+      "cmd": "0E",
+      "params": "0001"
+    },
+    {
+      "name": "Scene 1 OFF",
+      "cmd": "0E",
+      "params": "0000"
+    },
+    {
+      "name": "Scene 2 ON",
+      "cmd": "0E",
+      "params": "0101"
+    },
+    {
+      "name": "Save scene 1",
+      "cmd": "8E",
+      "params": "00"
+    },
+    {
+      "name": "Pair remote",
+      "cmd": "27",
+      "params": "01"
+    },
+    {
+      "name": "Unpair remote",
+      "cmd": "27",
+      "params": "02"
+    },
+    {
+      "name": "Enable pairing",
+      "cmd": "F2",
+      "params": ""
+    },
+    {
+      "name": "Disable pairing",
+      "cmd": "F0",
+      "params": ""
+    },
+    {
+      "name": "Custom key 1 down",
+      "cmd": "3A",
+      "params": "0100AA"
+    },
+    {
+      "name": "Custom key 1 up",
+      "cmd": "3A",
+      "params": "0101AA"
+    }
+  ],
+  "advIntervalMs": 20,
+  "startPackId": 186
 }

@@ -20,7 +20,10 @@ HEX = "0123456789ABCDEF"
 
 
 def hex_bytes(s):
-    clean = "".join(c for c in str(s or "") if c in HEX + HEX.lower())
+    text = str(s or "")
+    if any(c not in HEX + HEX.lower() + " \t\r\n:-" for c in text):
+        raise ValueError("Invalid hex: %r" % s)
+    clean = "".join(c for c in text if c in HEX + HEX.lower())
     return bytes.fromhex(clean)
 
 
@@ -45,8 +48,12 @@ def build_adv(target, device_type, group, pack_id, cmd, params):
 
 def one_byte(v, dflt):
     if isinstance(v, int):
-        return v & 0xFF
+        if not 0 <= v <= 255:
+            raise ValueError('Byte outside 0..255')
+        return v
     b = hex_bytes(v)
+    if len(b) > 1:
+        raise ValueError('Expected one byte')
     return b[0] if b else dflt
 
 
@@ -57,7 +64,7 @@ def main():
     interval = cfg.get("intervalMs", 100)
     dev = one_byte(cfg.get("deviceType", "FE"), 0xFE)
     group = one_byte(cfg.get("group", "00"), 0x00)
-    pack_id = int(cfg.get("startPackId", 0)) & 0xFF
+    pack_id = one_byte(cfg.get("startPackId", 0), 0)
     targets = cfg.get("targets") or ([cfg["remoteId"]] if cfg.get("remoteId") else [])
 
     print("配置: %s" % path)
