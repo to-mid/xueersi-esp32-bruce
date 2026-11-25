@@ -78,6 +78,7 @@ function bytesToHex(arr, sep) {
 }
 
 function oneByte(s, dflt) {
+  if (typeof s === "number") return s & 0xFF;
   var b = hexBytes(s);
   if (b.length === 0) return dflt;
   return b[0];
@@ -152,13 +153,20 @@ function row(y, text, color, size) {
   display.drawString(fit(text, size), 2, y);
 }
 
+function asList(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string") return [v];
+  if (v.length === undefined || v.length === 0) return null;
+  return v;
+}
+
 function targetsOf(cfg, pkt) {
-  var list = cfgGet(pkt, "targets", null);
-  if (list !== null && list.length > 0) return list;
+  var list = asList(cfgGet(pkt, "targets", null));
+  if (list !== null) return list;
   var single = cfgGet(pkt, "remoteId", null);
   if (single !== null) return [single];
-  list = cfgGet(cfg, "targets", null);
-  if (list !== null && list.length > 0) return list;
+  list = asList(cfgGet(cfg, "targets", null));
+  if (list !== null) return list;
   single = cfgGet(cfg, "remoteId", null);
   if (single !== null) return [single];
   return [];

@@ -34,7 +34,8 @@
 
     { "name": "情景1 开", "cmd": "0E", "params": "0001" },
     { "name": "情景1 关", "cmd": "0E", "params": "0000" },
-    { "name": "场景保存", "cmd": "0E", "params": "0101" },
+    { "name": "情景2 开", "cmd": "0E", "params": "0101" },
+    { "name": "保存情景1", "cmd": "8E", "params": "00" },
 
     { "name": "2.4G 对码", "cmd": "27", "params": "01" },
     { "name": "2.4G 清码", "cmd": "27", "params": "02" },
