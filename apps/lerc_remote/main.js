@@ -197,6 +197,7 @@ function runPacket(cfg, pkt) {
   var targetIndex = 0;
   var advertising = false;
   var lastSend = -1000000;
+  var bWasHigh = true;
 
   gpio.pinMode(KEY_A, INPUT);
   gpio.pinMode(KEY_B, INPUT);
@@ -209,7 +210,10 @@ function runPacket(cfg, pkt) {
   row(58, "PARAM " + (params.length === 0 ? "-" : bytesToHex(params, " ")), C_FG);
 
   while (true) {
-    if (keyboard.getEscPress()) break;
+    // B 键直接读电平取按下沿：不调用 check()，免得反复挂起 Bruce 的按键扫描任务
+    var bNow = gpio.digitalRead(KEY_B);
+    if (bWasHigh && bNow === 0) break;
+    bWasHigh = (bNow !== 0);
 
     if (gpio.digitalRead(KEY_A) === 0) {
       var t = now();
@@ -250,6 +254,9 @@ function runPacket(cfg, pkt) {
   }
 
   if (advertising) ble.rawAdvStop();
+  // 清掉按键任务里可能残留的 SelPress/EscPress，避免退出后菜单自己跳一下
+  keyboard.getSelPress();
+  keyboard.getEscPress();
 }
 
 function main() {
