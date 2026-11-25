@@ -56,10 +56,31 @@ class Device:
             raise RuntimeError('Interpreter probe failed: '+answer.decode('utf-8','replace'))
         return answer
 
+    def read_file(self, path):
+        # CLI md5/read use readSmallFile and block on files over its limit.
+        # Read binary through BJS instead, then hash the exact bytes on the PC.
+        code = """var s=require('storage');var data=null;
+try{data=s.read({fs:'littlefs',path:%s},true);}catch(readError){}
+if(data===null){console.log('REMOTE_FILE_MISSING');}
+else{var digits='0123456789abcdef';var line='';
+for(var i=0;i<data.length;i++){line+=digits.charAt(data[i]>>4)+digits.charAt(data[i]&15);
+if(line.length===256){console.log('REMOTE_BYTES='+line);line='';delay(5);}}
+if(line.length)console.log('REMOTE_BYTES='+line);
+console.log('REMOTE_FILE_SIZE='+data.length);}
+console.log('REMOTE_READ_DONE');""" % json.dumps(path)
+        answer = self.run_js(code,'REMOTE_READ_DONE')
+        if b'REMOTE_FILE_MISSING' in answer:
+            return None
+        matches = re.findall(rb'(?m)^REMOTE_BYTES=([0-9a-f]+)$',answer)
+        data = bytes.fromhex(b''.join(matches).decode())
+        size = re.search(rb'REMOTE_FILE_SIZE=(\d+)',answer)
+        if not size or len(data) != int(size.group(1)):
+            raise RuntimeError('Incomplete file readback: '+path)
+        return data
+
     def md5(self, path):
-        answer = self.command('md5 '+path)
-        matches = re.findall(rb'(?m)^([0-9a-fA-F]{32})\s*$', answer)
-        return matches[-1].decode().lower() if matches else None
+        data = self.read_file(path)
+        return hashlib.md5(data).hexdigest() if data is not None else None
 
     def install_file(self, source, target, backup_dir):
         content = source.read_text(encoding='utf-8-sig').replace('\r\n','\n')
@@ -72,8 +93,7 @@ class Device:
             print('Already current:',target,flush=True)
             return expected
         if old_md5:
-            answer = self.command('storage read '+target)
-            old_data = answer.split(b'\n',1)[1].rsplit(b'\n# ',1)[0]
+            old_data = self.read_file(target)
             if hashlib.md5(old_data).hexdigest() != old_md5:
                 raise RuntimeError('Cannot verify backup of '+target)
             (backup_dir/source.name).write_bytes(old_data)
