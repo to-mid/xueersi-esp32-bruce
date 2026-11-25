@@ -8,7 +8,7 @@
  * 帧格式（乐式 V1 遥控器帧，见《乐式 RF 数据包格式定义说明》）：
  *   01 | RemoteID(4, 小端) | RType(FE) | LampID | PackId | Cmd | Plen | Params | CRC
  *   前 5 字节明文，第 5 字节起（RType..CRC）用 V1 密钥异或。
- *   广播载荷：FF FF FF FF 0E + 上面的帧，外面套 AD 长度与 AD 类型(FF)。
+ *   广播载荷：FF FF FF FF + 帧长 + 帧，外面套 AD 长度与 AD 类型(FF)。
  */
 
 var display = require('display');
@@ -25,6 +25,10 @@ var H = display.height();
 
 var KEY_A = 34; // A 键，按住连发
 var KEY_B = 12; // B 键，返回
+var KEY_UP = 2;
+var KEY_DOWN = 13;
+var KEY_LEFT = 27;
+var KEY_RIGHT = 35;
 
 var C_BG = display.color(0, 0, 0);
 var C_FG = display.color(255, 255, 255);
@@ -40,7 +44,7 @@ var V1_KEYS = [
   0x6E, 0x49, 0x5C, 0x85, 0x37, 0x3C, 0xA6, 0x88
 ];
 var HEX_CHARS = "0123456789ABCDEF";
-var ADV_PREFIX = [0xFF, 0xFF, 0xFF, 0xFF, 0x0E];
+var ADV_PREFIX = [0xFF, 0xFF, 0xFF, 0xFF];
 
 function hexClean(s) {
   var out = "";
@@ -113,8 +117,9 @@ function buildAdv(targetId, deviceType, group, packId, cmd, params) {
   var key = V1_KEYS[wire[0] & 0x0F];
   for (i = 5; i < frame.length; i++) frame[i] = (frame[i] ^ key) & 0xFF;
 
-  var adv = [frame.length + ADV_PREFIX.length + 1, 0xFF];
+  var adv = [frame.length + ADV_PREFIX.length + 2, 0xFF];
   for (i = 0; i < ADV_PREFIX.length; i++) adv.push(ADV_PREFIX[i]);
+  adv.push(frame.length);
   for (i = 0; i < frame.length; i++) adv.push(frame[i]);
   return adv;
 }
@@ -222,144 +227,148 @@ function initPackId(cfg) {
   PACK_ID = v & 0xFF;
 }
 
-/* 发送界面：按住 A 连发，B 返回 */
-function runPacket(cfg, pkt) {
-  var prepared = preparePacket(cfg, pkt);
-  var targets = prepared.targets, interval = prepared.interval;
-  var deviceType = prepared.deviceType, group = prepared.group, cmd = prepared.cmd;
-  var params = prepared.params, name = prepared.name;
+// Debounce physical keys without consuming Bruce's shared menu key flags.
+function readButton(state, pin, time) {
+  var raw = gpio.digitalRead(pin) === 0;
+  if (raw !== state.raw) { state.raw = raw; state.changed = time; }
+  var pressed = false;
+  if (raw !== state.down && time - state.changed >= 20) {
+    state.down = raw;
+    pressed = raw;
+  }
+  return pressed;
+}
 
-  initPackId(cfg);
-  var packId = PACK_ID;
+function moveSelection(index, delta, total) {
+  return ((index + delta) % total + total) % total;
+}
 
-  var sent = 0;
-  var targetIndex = 0;
-  var advertising = false;
-  var lastSend = -1000000;
-  var bWasHigh = true;
-
-  gpio.pinMode(KEY_A, INPUT);
-  // GPIO12 needs the board's internal pull-up; INPUT leaves B floating low.
-  gpio.pinMode(KEY_B, INPUT_PULLUP);
-
+function drawList(cfg, index) {
+  var packets = cfg.packets;
+  var total = packets.length + 1; // Last item reloads the editable JSON.
+  var page = Math.floor(index / 5) * 5;
   display.fill(C_BG);
-  row(2, name, C_ACC, 2);
-  row(22, "Hold A: TX   B: Back", C_DIM);
-  row(34, "TGT " + targets[0], C_FG);
-  row(46, "CMD " + bytesToHex([cmd]) + "  DT " + bytesToHex([deviceType]) + "  G " + bytesToHex([group]), C_FG);
-  row(58, "PARAM " + (params.length === 0 ? "-" : bytesToHex(params, " ")), C_FG);
-
-  row(72, "Release A to arm", C_DIM);
-  while (gpio.digitalRead(KEY_A) === 0) {
-    if (gpio.digitalRead(KEY_B) === 0) return;
-    delay(5);
+  row(0, 'LERC REMOTE ' + (index + 1) + '/' + total, C_ACC);
+  if (index < packets.length) {
+    var p = preparePacket(cfg, packets[index]);
+    row(14, 'ID ' + p.targets[0] + ' G' + bytesToHex([p.group]), C_DIM);
+    row(90, bytesToHex([p.cmd]) + ': ' + (p.params.length ? bytesToHex(p.params, ' ') : '-'), C_FG);
+  } else {
+    row(14, 'Reload from LittleFS', C_DIM);
   }
-  delay(25);
-  row(72, "READY - hold A", C_ACC);
+  for (var i = 0; i < 5 && page + i < total; i++) {
+    var n = page + i;
+    var label = n === packets.length ? 'Reload packets.json' : (n + 1) + '. ' + String(packets[n].name);
+    row(28 + i * 12, (n === index ? '> ' : '  ') + label, n === index ? C_ACC : C_FG);
+  }
+  row(104, 'READY - hold A to TX', C_ACC);
+  row(116, 'UP/DN  A:TX  B:EXIT', C_DIM);
+}
+
+function runList(cfg) {
+  gpio.pinMode(KEY_A, INPUT);
+  gpio.pinMode(KEY_B, INPUT_PULLUP);
+  gpio.pinMode(KEY_UP, INPUT_PULLUP);
+  gpio.pinMode(KEY_DOWN, INPUT_PULLUP);
+  gpio.pinMode(KEY_LEFT, INPUT_PULLUP);
+  gpio.pinMode(KEY_RIGHT, INPUT);
+  var pins = [KEY_A, KEY_B, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT];
+  var keys = [];
+  var start = now();
+  for (var k = 0; k < pins.length; k++) {
+    var held = gpio.digitalRead(pins[k]) === 0;
+    keys.push({raw: held, down: held, changed: start, repeatAt: start + 450});
+  }
+  // Opening the app with A held must not transmit until it is released.
+  var armed = !keys[0].down;
+  var index = 0, sent = 0, targetIndex = 0;
+  var advertising = false, fault = false, lastSend = -1000000;
+  initPackId(cfg);
+  drawList(cfg, index);
+  console.log('LERC_READY packets=' + cfg.packets.length + ' fs=littlefs');
   try {
-  while (true) {
-    // B 键直接读电平取按下沿：不调用 check()，免得反复挂起 Bruce 的按键扫描任务
-    var bNow = gpio.digitalRead(KEY_B);
-    if (bWasHigh && bNow === 0) break;
-    bWasHigh = (bNow !== 0);
-
-    if (gpio.digitalRead(KEY_A) === 0) {
-      var t = now();
-      if (t - lastSend >= interval) {
-        var target = targets[targetIndex % targets.length];
-        var adv = buildAdv(target, deviceType, group, packId, cmd, params);
-        if (adv === null) {
-          dialog.error("包参数不合法（ID 或参数长度）");
-          break;
+    while (true) {
+      var time = now();
+      var edges = [];
+      for (var j = 0; j < pins.length; j++) edges.push(readButton(keys[j], pins[j], time));
+      if (keys[1].down) break;
+      if (!keys[0].raw) {
+        if (!keys[0].down) { armed = true; fault = false; }
+        if (advertising) {
+          ble.rawAdvStop(); advertising = false;
+          row(104, 'SENT ' + sent + ' STOPPED', C_DIM);
         }
-        if (adv.length > 31) {
-          dialog.error("广播包 " + adv.length + " 字节，超过 31 字节上限");
-          break;
-        }
-        var hex = bytesToHex(adv);
-        if (!ble.rawAdv(hex, prepared.advInterval)) {
-          dialog.error("BLE 广播启动失败");
-          break;
-        }
-        advertising = true;
-        sent++;
-        lastSend = t;
-
-        row(34, "TGT " + target, C_FG);
-        row(72, "SENT " + sent + "  PID " + bytesToHex([packId]), C_ACC);
-        row(84, "ADV " + bytesToHex(adv, " "), C_DIM);
-
-        PACK_ID = (packId + 1) & 0xFF;
-        packId = PACK_ID;
-        targetIndex = (targetIndex + 1) % targets.length;
       }
-    } else if (advertising) {
-      ble.rawAdvStop();
-      advertising = false;
-      row(72, "SENT " + sent + "  STOPPED", C_DIM);
+      if (!keys[0].raw) {
+        var delta = 0;
+        for (var nav = 2; nav < 6; nav++) {
+          if (edges[nav]) keys[nav].repeatAt = time + 450;
+          var repeated = keys[nav].down && keys[nav].raw && time >= keys[nav].repeatAt;
+          if (edges[nav] || repeated) {
+            delta = nav === 2 ? -1 : (nav === 3 ? 1 : (nav === 4 ? -5 : 5));
+            if (repeated) keys[nav].repeatAt = time + 150;
+            break;
+          }
+        }
+        if (delta !== 0) {
+          index = moveSelection(index, delta, cfg.packets.length + 1);
+          targetIndex = 0;
+          drawList(cfg, index);
+        }
+      }
+      if (edges[0] && armed && index === cfg.packets.length) {
+        try {
+          var updated = loadConfig();
+          validateConfig(updated);
+          cfg = updated;
+          index = 0;
+          drawList(cfg, index);
+          row(104, 'CONFIG RELOADED', C_ACC);
+        } catch (reloadError) {
+          row(104, 'CONFIG ERROR', C_WARN);
+          console.log('LERC_CONFIG_ERROR ' + reloadError.message);
+        }
+        armed = false;
+      } else if (armed && keys[0].down && keys[0].raw && !fault && index < cfg.packets.length) {
+        if (edges[0]) { lastSend = -1000000; targetIndex = 0; }
+        if (time - lastSend >= Number(cfgGet(cfg.packets[index], 'intervalMs', cfgGet(cfg, 'intervalMs', 100)))) {
+          try {
+            var packet = preparePacket(cfg, cfg.packets[index]);
+            var target = packet.targets[targetIndex % packet.targets.length];
+            var ad = buildAdv(target, packet.deviceType, packet.group, PACK_ID, packet.cmd, packet.params);
+            if (ad === null || ad.length > 31) throw new Error('Invalid advertisement');
+            var hex = bytesToHex(ad);
+            if (!ble.rawAdv(hex, packet.advInterval)) throw new Error('BLE start failed');
+            advertising = true;
+            sent++;
+            row(104, 'TX ' + sent + ' PID ' + bytesToHex([PACK_ID]), C_ACC);
+            console.log('LERC_TX pid=' + PACK_ID + ' ad=' + hex);
+            PACK_ID = (PACK_ID + 1) & 0xFF;
+            targetIndex = (targetIndex + 1) % packet.targets.length;
+            lastSend = now();
+          } catch (sendError) {
+            ble.rawAdvStop(); advertising = false; fault = true;
+            row(104, 'TX ERROR - retry A', C_WARN);
+            console.log('LERC_TX_ERROR ' + sendError.message);
+          }
+        }
+      }
+      delay(5);
     }
-
-    delay(5);
-  }
   } finally {
     ble.rawAdvStop();
   }
+  return index;
 }
 
 function main() {
   if (typeof ble.rawAdv !== 'function') {
-    dialog.error("Update firmware: missing ble.rawAdv", true);
-    return;
+    dialog.error('Update firmware: missing ble.rawAdv', true); return;
   }
   var cfg = loadConfig();
-  if (cfg === null) {
-    dialog.error("Cannot read packets.json", true);
-    return;
-  }
   try { validateConfig(cfg); }
-  catch (configError) { dialog.error(configError.message, true); return; }
-  var packets = cfgGet(cfg, "packets", []);
-  if (packets.length === 0) {
-    dialog.error("packets.json 里没有任何包");
-    return;
-  }
-  console.log("LERC_READY packets=" + packets.length + " fs=littlefs");
-
-  while (true) {
-    var list = [];
-    var i;
-    for (i = 0; i < packets.length; i++) {
-      var p = packets[i];
-      var label = (i + 1) + ". " + String(cfgGet(p, "name", "包" + (i + 1)));
-      var tail = String(cfgGet(p, "cmd", ""));
-      if (tail !== "") label += " [" + tail + "]";
-      list.push([label, String(i)]);
-    }
-    list.push(["-- Reload packets.json", "reload"]);
-    list.push(["-- Exit", "exit"]);
-
-    var pick = dialog.choice(list);
-    if (pick === "" || pick === "exit") break;
-    if (pick === "reload") {
-      var again = loadConfig();
-      if (again !== null) {
-        try {
-          validateConfig(again);
-          cfg = again;
-          packets = cfg.packets;
-        } catch (reloadError) { dialog.error(reloadError.message, true); }
-      } else {
-        dialog.error("Cannot read packets.json", true);
-      }
-      continue;
-    }
-    var index = parseInt(pick, 10);
-    if (isNaN(index) || index < 0 || index >= packets.length) continue;
-    try { runPacket(cfg, packets[index]); }
-    catch (sendError) { ble.rawAdvStop(); dialog.error(sendError.message, true); }
-  }
-
-  ble.rawAdvStop();
+  catch (configError) { dialog.error('Invalid packets.json: ' + configError.message, true); return; }
+  runList(cfg);
   display.fill(C_BG);
 }
 

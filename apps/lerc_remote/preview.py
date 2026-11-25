@@ -15,7 +15,7 @@ V1_KEYS = [
     0xCB, 0x6A, 0x95, 0x8D, 0xB6, 0x7B, 0x35, 0x5A,
     0x6E, 0x49, 0x5C, 0x85, 0x37, 0x3C, 0xA6, 0x88,
 ]
-ADV_PREFIX = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0x0E])
+ADV_PREFIX = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 HEX = "0123456789ABCDEF"
 
 
@@ -42,7 +42,7 @@ def build_adv(target, device_type, group, pack_id, cmd, params):
     key = V1_KEYS[wire[0] & 0x0F]
     for i in range(5, len(frame)):
         frame[i] ^= key
-    data = ADV_PREFIX + bytes(frame)
+    data = ADV_PREFIX + bytes([len(frame)]) + bytes(frame)
     return bytes([len(data) + 1, 0xFF]) + data
 
 

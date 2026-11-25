@@ -1,109 +1,106 @@
-# 乐式遥控包发射器（Bruce 扩展应用，不插卡）
+# 乐式遥控器（Bruce 扩展应用，不插 TF 卡）
 
-把学而思这台 ESP32 当成一台"万能乐式遥控器"：按你在 `packets.json` 里定义的列表，
-把参考产测脚本中的 BLE 遥控帧广播出去。这里是 BLE 广播，并非任意 2.4GHz RF 调制协议。整个应用是 Bruce 的 BJS 脚本，脚本和配置都放在
-片内 LittleFS 上，**不需要 SD 卡**。
+应用和自定义包列表保存在内部 LittleFS：`/BruceJS/lerc_remote/`。
+打开 `JS Interpreter → lerc_remote → main`。发送的是乐式 V1 遥控帧的 BLE 厂商广播。
 
-```
-主菜单 -> Scripts -> lerc_remote -> main
-```
+## 列表直接发包
 
-## 文件
-
-| 文件 | 作用 |
+| 按键 | 操作 |
 | --- | --- |
-| `main.js` | 应用本体：列表菜单、组包、加密、按住连发 |
-| `packets.json` | 你的包列表（改这里就行，不用动代码） |
-| `catalog.json` | 从协议表「遥控器命令表」导出的 116 条命令，纯参考 |
-| `gen_packets.py` | 重新导出 catalog.json |
-| `install.py` | 通过 USB 安装应用或只更新包列表，含备份和 MD5 回读校验 |
-| `test_remote.js` / `verify_reference.py` | 按键/边界回归及与产测脚本的 256 组差分测试 |
+| 上 / 下 | 选择上一条 / 下一条，首尾循环；长按滚动 |
+| 左 / 右 | 前后移动 5 项 |
+| A | **直接发送当前选中项**，按住连发，松开停止；不进入二级页面 |
+| B | 停止发送并退出应用 |
 
-## 装到设备上
+列表下方显示当前命令、参数、发送计数及包序号。发送期间保持选中项；换项前先松开 A。
+从 Bruce 打开应用时若仍按着 A，先松开再按，避免打开应用的确认键触发广播。
+最后一项是 `Reload packets.json`，按 A 重新读取配置；非法配置会保留原列表。
 
-1. 刷入带 `ble.rawAdv()` / `ble.rawAdvStop()` 的固件；首次需更新固件，以后改包列表不需要重刷。
-2. 不插 TF 卡，在本文件所在目录运行：
+使用独立的 GPIO 消抖读取，避免通用菜单的翻页按键行为影响上下选择。B、上、下、左保留内部上拉，A 和右使用板上的外部上拉。
 
-   ```powershell
-   python -m pip install pyserial
-   python install.py --port COM14 --launch
-   ```
+## 当前默认配置
 
-   程序先检查固件接口，确认没有挂载 TF 卡，上传到 **LittleFS 的 `/BruceJS/lerc_remote/`**，并回读 MD5 校验。已有文件会先备份到电脑端 `output/日期时间/`。
-3. 主菜单进 `JS Interpreter`（部分主题名为 `Scripts`），选 `[ lerc_remote ]` -> `main`。沿用现有 `/BruceJS` 根目录，不新建优先级更高的 `/scripts`，因此不会遮住已安装的 App Store。
+第一项 `Light ON` 按用户提供的接收日志设置：遥控器 ID `0AD3C5AB`、组 `00`、命令 `00`、参数 **`01 AA AA 00 00`**，首包序号 `01`。
 
-也可以通过 WebUI 上传这两个文件到同一目录，选择 LittleFS。`catalog.json` 是电脑端的命令说明，不必上传掌机。
+```text
+解密帧：01 AB C5 D3 0A FE 00 01 00 05 01 AA AA 00 00 58
+厂商数据：FF FF FF FF 10 01 AB C5 D3 0A 7B 85 84 85 80 84 2F 2F 85 85 DD
+完整 AD：16 FF FF FF FF FF 10 01 AB C5 D3 0A 7B 85 84 85 80 84 2F 2F 85 85 DD
+```
 
-改包列表后只需执行：
+三种表示的区别：厂商数据外增加了 AD 长度和类型 `FF` 才是传给 `ble.rawAdv()` 的完整 AD。
+厂商头 `FF FF FF FF` 后的字节是**后续帧长度**：5 字节参数为 `10`，3 字节参数为 `0E`，不可固定为 `0E`。
+包序号每次更新递增，因此后续包的加密序号和 CRC 会变化；换项不会重置序号。
+
+仍保留 29 条可编辑示例，其他功能的参数需按实际灯具支持情况调整。
+`Production test` 单独保留原产测脚本的两个目标 `6012BAF1` / `FFFFFFFF` 和参数，不随普通条目的默认遥控器 ID 改变。
+
+## 修改自己的包列表
+
+编辑本目录的 `packets.json`，然后在此目录执行：
 
 ```powershell
 python install.py --port COM14 --config-only --launch
 ```
 
-可用 `--config 其他文件.json` 安装自己的包列表。USB 更新会先退出正在运行的 JS 应用；WebUI 更新后可在应用内选 `Reload packets.json`，错误配置不会替换当前有效列表。只有按住 A 时发送，进入菜单和选中包都不会自动发送。
-
-## 按键
-
-| 键 | 作用 |
-| --- | --- |
-| 上/下/左/右 | 列表里选择 |
-| A（GPIO34） | 在发送界面**按住就连发**，松开停 |
-| B（GPIO12） | 返回上一层 |
-
-进入发送界面先松开 A，看到 `READY - hold A` 后重新按住发送。松开 A 或按 B 都会停止广播；退出脚本或脚本异常时，固件也会停止并释放这次原始广播。此机制不能替代断电等硬件故障下的验证。
-
-## packets.json
+不用重编固件。也可以用 `--config 其他文件.json` 安装另一份列表。
+安装工具退出当前 JS，备份旧文件到电脑 `output/日期时间/`，上传临时文件，通过 BJS 回读完整字节并在电脑核对 MD5 后替换。
 
 ```json
 {
   "intervalMs": 100,
   "advIntervalMs": 20,
-  "startPackId": 186,
-  "targets": ["6012BAF1", "FFFFFFFF"],
+  "startPackId": 1,
+  "targets": ["0AD3C5AB"],
   "deviceType": "FE",
   "group": "00",
   "packets": [
-    { "name": "开灯", "cmd": "00", "params": "01" }
+    {"name": "Light ON", "cmd": "00", "params": "01AAAA0000"}
   ]
 }
 ```
 
 | 字段 | 说明 |
 | --- | --- |
-| `intervalMs` | 更新命令/轮换目标间隔，默认 100ms，范围 20–60000ms |
-| `advIntervalMs` | 同一包的 BLE 广播间隔，默认 20ms，范围 20–10240ms；与目标轮换间隔独立，默认匹配产测脚本 |
-| `targets` | 遥控器 ID 列表，4 字节，写成 `6012BAF1` 这种显示顺序即可（包内会自动转小端）。写多个就轮流发，和产测脚本行为一致 |
-| `remoteId` | 只发一个目标时可以用它代替 `targets` |
-| `deviceType` | 帧里的 RType，默认 `FE` |
-| `group` | 帧里的 LampID（组 ID），默认 `00` |
-| `startPackId` | 首包序号；示例 186 即 BA（也可写字符串 `"BA"`）。不写则用开机毫秒数低 8 位；换包或返回包列表不会重置，退出整个脚本重新运行才重置 |
-| `packets[].name` | 菜单名字，建议英文；当前屏幕字体不保证中文，示例因此使用英文 |
-| `packets[].cmd` | 命令字，见 `catalog.json`，如 `00` 开灯、`02` 亮度+、`FE` 测试模式 |
-| `packets[].params` | 参数字节，十六进制，最多 9 字节；没有参数就写 `""` |
-| `packets[].remoteId` / `targets` / `group` / `deviceType` / `intervalMs` / `advIntervalMs` | 单条包独立覆盖全局设置 |
+| `targets` | 4 字节遥控器 ID 列表，多个则交替发；`remoteId` 可代替单目标列表。显示顺序输入，帧内自动转小端 |
+| `deviceType` / `group` | RType / LampID，默认 `FE` / `00` |
+| `intervalMs` | 更新包序号及轮换目标的间隔，默认 100ms，范围 20–60000ms |
+| `advIntervalMs` | 同一包的 BLE 广播间隔，默认 20ms，范围 20–10240ms |
+| `startPackId` | 首包序号，数字 1 或十六进制字符串 `"01"`；退出应用重开才重置 |
+| `packets[].name` | 列表名称，建议英文，当前字体不保证中文显示 |
+| `packets[].cmd` | 单字节命令，见 `catalog.json` 的 116 条命令参考 |
+| `packets[].params` | 十六进制参数，最多 9 字节，无参数用 `""` |
+| 条目覆盖 | 单项可覆盖 `targets` / `remoteId` / `deviceType` / `group` / `intervalMs` / `advIntervalMs` |
 
-`_说明` 这种字段只是注释，程序会忽略。
+十六进制字符串允许空格、冒号、短横线；数字单字节必须为 0–255 整数。启动及重载前校验全部条目。
+`FFFFFFFF` 是保留测试 ID；普通产品遥控器应填自己的 ID。
 
-`cmd`、`params`、地址和字符串类型的单字节字段按十六进制解释，可带空格、冒号或短横线，不能有奇数字符或非法字符。数字类型的单字节字段须为 0–255 的整数。所有条目在启动和重载时先检查，错误会指出条目序号。
+## 首次安装
 
-默认 29 个示例包括开关灯、调光、色温、RGB、情景、对码及参考产测命令。除产测示例沿用提供的实际脚本外，各功能能否响应取决于灯具支持的命令和参数范围。协议未给出的亮度百分比不作推断，示例直接标注原始值 `0x0080` / `0x00FF`。`FFFFFFFF` 是协议保留的免对码测试 ID，仅沿用产测脚本作为默认示例，实际产品遥控器应填写自己的 ID。
+需要支持 `ble.rawAdv()` / `ble.rawAdvStop()` 的 Bruce 固件。COM14 已安装对应固件。
 
-## 帧格式
-
-和《乐式 RF 数据包格式定义说明》「数据包帧说明」里的遥控器帧一致：
-
-```
-01 | RemoteID(4, 小端) | RType | LampID | PackId | Cmd | Plen | Params | CRC
+```powershell
+python -m pip install pyserial
+python install.py --port COM14 --launch
 ```
 
-- 前 5 字节（帧头 + ID）明文；
-- 从 RType 起到 CRC，逐字节异或 V1 密钥，密钥下标 = 包内 ID 首字节低 4 位；
-- CRC = 前面所有明文字节求和取反；
-- 广播载荷 = `FF FF FF FF 0E` + 帧，外面套 AD 长度和 AD 类型 `FF`。
+工具要求没有挂载 TF 卡，文件写入 LittleFS 的 `/BruceJS/lerc_remote`；沿用 `/BruceJS`，现有 App Store 仍可见。
+`catalog.json` 是电脑参考，不必占用设备存储。
 
-组包结果用 `verify_reference.py` 提取实际 `产测脚本.py` 的
-`build_remote_payload()` / `build_adv_data()`，与 JS 的 256 组数据逐字节比对，覆盖全部 16 种 V1 密钥、序号边界和不同参数长度。
-协议本身规定 `Plen=max9`；BLE 传统广播还另有总长不超过 31 字节的限制。
+## 帧格式与编码
+
+```text
+明文帧：01 | RemoteID LE4 | RType | LampID | PackId | Cmd | Plen | Params | CRC
+厂商数据：FF FF FF FF | 帧长 | 加密帧
+完整 AD：AD长度 | FF | 厂商数据
+```
+
+CRC 为此前全部明文字节累加取反。帧头和 ID 共 5 字节明文，其余字节（包括 CRC）与 V1 密钥异或，密钥索引取包内 ID 首字节的低四位。
+协议参数上限 9 字节，完整传统 BLE AD 另受 31 字节限制。
+
+原产测脚本固定 3 字节参数，厂商帧长度因此写死 `0E`；可变长度应用现已按实际帧长度生成。
+`verify_reference.py` 对 256 组加密帧与实际脚本做差分，独立校验长度，并对其中 64 组 3 字节参数的完整 AD 验证兼容。
+用户提供的 5 字节开灯抓包另作固定回归向量，包含精确的完整 AD、CRC 和加密字节。
 
 ```powershell
 node test_remote.js
@@ -111,42 +108,15 @@ python verify_reference.py "C:\路径\产测脚本.py"
 python preview.py
 ```
 
-## 固件改动
+## 验证记录（2026-11-25）
 
-为了能发任意广播包，给 BJS 解释器的 `ble` 模块加了两个函数：
+- 云编译 `45609513167` 成功，COM14 固件为 `73c8f9080246bc5840d5fac4e070a73225947b9f`，写后校验通过；完整备份留在电脑，保留 NVS 和 LittleFS。PSRAM 启动正常。
+- 修复 B 键误返回：`INPUT` 无按键时 100/100 读低，`INPUT_PULLUP` 下 0/100 读低。
+- 列表直接发送回归覆盖上键首尾循环、短脉冲消抖、长按滚动、A 直接发送/松开停止、B 返回、发送失败等待重新按 A、引脚上拉及 160×128 行位置。
+- 实机解释器使用模拟上下/A 时序和真实 B 电平，完成上翻/下翻、4 次发送与正常退出；计算出的首个开灯 AD 与抓包逐字节一致。无线发送替换为通用测试 AD `02FF00`，没有自动发送乐式控制或产测命令。
+- Windows 蓝牙扫描不可用；**未验证空中接收或灯具响应**，实际按键和灯具兼容性需用户试用。
 
-| 文件 | 改动 |
-| --- | --- |
-| `src/modules/bjs_interpreter/ble_js.cpp` | 新增 `native_bleRawAdv()` / `native_bleRawAdvStop()`：把整段 AD 数据灌进不可连接广播，可设广播间隔 |
-| `src/modules/bjs_interpreter/ble_js.h` | 声明这两个函数 |
-| `src/modules/bjs_interpreter/mqjs_stdlib.c` | 在 `js_ble[]` 里注册 `rawAdv` / `rawAdvStop` |
-| `src/modules/bjs_interpreter/interpreter.cpp` | JS 执行结束后停止并释放本次原始广播，再展示异常或返回菜单 |
+## 固件接口
 
-JS 侧用法：
-
-```js
-ble.rawAdv("02FF00", 20)                    // 完整 AD 数据示例；true 表示已开始广播
-ble.rawAdvStop()                                // 停止（不释放协议栈）
-ble.rawAdvStop(true)                            // 停止并 deinit
-```
-
-## 排错
-
-- 菜单里看不到 `lerc_remote`：LittleFS 里没有 `/BruceJS/lerc_remote/main.js`，或扩展名不是 `.js/.bjs`。若自行创建过 `/scripts` / `/BruceScripts`，固件会优先列出那里的内容，可用 `Load...` 手动打开本应用。
-- 提示"读取失败"：`packets.json` 不在和 `main.js` 同一目录。
-- 提示"包参数不合法"：`remoteId/targets` 不是 4 字节，或 `params` 超过 9 字节。
-- 灯没反应：先确认 `targets` 里是灯的遥控器 ID；用手机 BLE 扫描能看到这台设备在广播，
-  但广告包是厂商数据 `FFFF` + `FF FF 0E`，普通扫描器不会显示名字。
-
-## COM14 安装验证（2026-11-25）
-
-- 云编译运行 `45609513167` 成功；已烧入固件提交 `73c8f9080246bc5840d5fac4e070a73225947b9f`，写后校验通过。
-- 烧录前完成全片备份，分区表与备份相同；保留 NVS 和 LittleFS。启动确认 PSRAM 可用、屏幕尺寸 160×128，未发现 panic。
-- `main.js` 和 29 条示例包已安装到 `/BruceJS/lerc_remote`；通过解释器回读原始字节并在电脑端核对 MD5，绕过固件 CLI 对大文件的读取限制。
-- 实机显示启动标记 `LERC_READY packets=29 fs=littlefs`；配置单独更新、旧文件备份和恢复原配置均已通过，最后停在待操作菜单。
-- 无线接口拒绝了非法十六进制及错误 AD 长度；用通用测试 AD `02FF00` 启动 250ms 后调用停止，控制器返回成功。没有自动发送乐式产测、对码或清码指令。
-- Windows 蓝牙扫描不可用，**未验证空中接收或灯具响应**。按键松开、返回和异常清理通过模拟回归，实际按键手感与灯具兼容性仍需用户试用。
-
-### B 键误触发返回修复
-
-发送页曾把 GPIO12 配为 `INPUT`，关闭板级初始化设置的内部上拉，导致 B 键悬空时误判返回。实机无按键采样：`INPUT` 下 100/100 为低电平，`INPUT_PULLUP` 下 0/100 为低电平。现已保留 B 键上拉，GPIO34 的 A 键仍使用外部上拉。回归新增引脚模式检查，并在实机使用真实 B 键电平、模拟 A 键时序完成 5 次通用测试广播后正常返回；未发送乐式命令。
+`ble.rawAdv(hex, intervalMs)` 发送完整 AD，使用不可连接广播；`ble.rawAdvStop()` 停止，传 `true` 同时释放 BLE。
+解释器退出时兜底停止本次原始广播。当前这次列表和长度修复只更新 JS/JSON，无需重刷固件。

@@ -22,6 +22,12 @@ class Device:
         self.port.open()
         self.transcript = bytearray()
         self.receive(.4)
+        # The first write after reopening this USB UART can contain stale bytes.
+        # Synchronize on empty CLI lines before sending an actual command.
+        self.port.write(b'\n')
+        self.receive(.4)
+        self.port.write(b'\n')
+        self.receive(.4)
 
     def receive(self, seconds, marker=None):
         data = bytearray()
@@ -46,12 +52,14 @@ class Device:
         answer = self.receive(5, b'until EOF')
         if b'until EOF' not in answer:
             raise RuntimeError('Interpreter upload handshake failed')
-        for start in range(0,len(code.encode()),256):
-            self.port.write(code.encode()[start:start+256])
-            time.sleep(.01)
+        data = code.encode()
+        for start in range(0,len(data),128):
+            self.port.write(data[start:start+128])
+            self.port.flush()
+            time.sleep(.015)
         self.port.write(b'\nEOF\n')
         answer = self.receive(8, marker.encode())
-        answer += self.receive(.6)
+        answer += self.receive(1)
         if marker.encode() not in answer:
             raise RuntimeError('Interpreter probe failed: '+answer.decode('utf-8','replace'))
         return answer
@@ -88,12 +96,12 @@ console.log('REMOTE_READ_DONE');""" % json.dumps(path)
             content += '\n'
         data = content.encode('utf-8')
         expected = hashlib.md5(data).hexdigest()
-        old_md5 = self.md5(target)
+        old_data = self.read_file(target)
+        old_md5 = hashlib.md5(old_data).hexdigest() if old_data is not None else None
         if old_md5 == expected:
             print('Already current:',target,flush=True)
             return expected
         if old_md5:
-            old_data = self.read_file(target)
             if hashlib.md5(old_data).hexdigest() != old_md5:
                 raise RuntimeError('Cannot verify backup of '+target)
             (backup_dir/source.name).write_bytes(old_data)
@@ -106,8 +114,9 @@ console.log('REMOTE_READ_DONE');""" % json.dumps(path)
         for line in data.splitlines(keepends=True):
             if line.rstrip(b'\n') == b'EOF':
                 raise ValueError('A literal EOF line cannot be uploaded by this CLI')
-            for start in range(0,len(line),256):
-                self.port.write(line[start:start+256])
+            for start in range(0,len(line),128):
+                self.port.write(line[start:start+128])
+                self.port.flush()
                 time.sleep(.008)
         self.port.write(b'EOF\n')
         answer = self.receive(8,b'\n# ')

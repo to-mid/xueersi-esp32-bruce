@@ -19,5 +19,13 @@ for v in vectors:
     namespace.update(GROUP=0, OPCODE=v['cmd'], PARAMS=bytes(v['params']))
     payload = namespace['build_remote_payload'](bytes.fromhex(v['target']), v['id'])
     expected = namespace['build_adv_data'](payload).hex().upper()
-    assert expected == v['hex'], (v, expected)
-print(f'PASS: {len(vectors)} vectors match the actual production script, across all 16 V1 keys')
+    actual = bytes.fromhex(v['hex'])
+    reference_ad = bytes.fromhex(expected)
+    # The production script hardcodes 0E for its fixed 3-byte parameters.
+    # Compare the encrypted frames for all lengths, independently check length.
+    assert actual[7:] == reference_ad[7:], (v, expected)
+    assert actual[6] == len(actual[7:])
+    assert actual[0] == len(actual)-1
+    if len(v['params']) == 3:
+        assert expected == v['hex'], (v, expected)
+print(f'PASS: {len(vectors)} encrypted frames match the production script; dynamic lengths verified; 64 complete 3-parameter advertisements match')

@@ -1,22 +1,25 @@
 {
   "intervalMs": 100,
   "targets": [
-    "6012BAF1",
-    "FFFFFFFF"
+    "0AD3C5AB"
   ],
   "deviceType": "FE",
   "group": "00",
   "_说明": "targets 写多个时会像产测脚本那样轮流发；只发一个就只留一项。packets 里每一项都可以再写 remoteId/targets/group/deviceType/intervalMs 覆盖上面的默认值。params 最多 9 字节。",
   "packets": [
     {
-      "name": "Production test",
-      "cmd": "FE",
-      "params": "01AAAA"
-    },
-    {
       "name": "Light ON",
       "cmd": "00",
-      "params": "01"
+      "params": "01AAAA0000"
+    },
+    {
+      "name": "Production test",
+      "cmd": "FE",
+      "params": "01AAAA",
+      "targets": [
+        "6012BAF1",
+        "FFFFFFFF"
+      ]
     },
     {
       "name": "Light OFF",
@@ -155,5 +158,5 @@
     }
   ],
   "advIntervalMs": 20,
-  "startPackId": 186
+  "startPackId": 1
 }
