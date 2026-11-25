@@ -1,0 +1,49 @@
+{
+  "intervalMs": 100,
+  "targets": ["6012BAF1", "FFFFFFFF"],
+  "deviceType": "FE",
+  "group": "00",
+
+  "_说明": "targets 写多个时会像产测脚本那样轮流发；只发一个就只留一项。packets 里每一项都可以再写 remoteId/targets/group/deviceType/intervalMs 覆盖上面的默认值。params 最多 9 字节。",
+
+  "packets": [
+    { "name": "产测 进入测试模式", "cmd": "FE", "params": "01AAAA" },
+    { "name": "退出测试模式", "cmd": "FE", "params": "00" },
+
+    { "name": "开灯", "cmd": "00", "params": "01" },
+    { "name": "关灯", "cmd": "00", "params": "00" },
+    { "name": "开关切换", "cmd": "00", "params": "02" },
+    { "name": "一键关灯", "cmd": "01", "params": "" },
+
+    { "name": "亮度+", "cmd": "02", "params": "" },
+    { "name": "亮度-", "cmd": "03", "params": "" },
+    { "name": "颜色+", "cmd": "04", "params": "" },
+    { "name": "颜色-", "cmd": "05", "params": "" },
+    { "name": "调光调色停止", "cmd": "0A", "params": "" },
+
+    { "name": "亮度设置 50%", "cmd": "08", "params": "0080" },
+    { "name": "亮度设置 100%", "cmd": "08", "params": "00FF" },
+    { "name": "色温 中性光", "cmd": "0C", "params": "00" },
+    { "name": "色温 冷光", "cmd": "0C", "params": "01" },
+    { "name": "色温 暖光", "cmd": "0C", "params": "02" },
+
+    { "name": "RGB 红", "cmd": "16", "params": "FF0000" },
+    { "name": "RGB 绿", "cmd": "16", "params": "00FF00" },
+    { "name": "RGB 蓝", "cmd": "16", "params": "0000FF" },
+    { "name": "RGB 白", "cmd": "16", "params": "FFFFFF" },
+
+    { "name": "情景1 开", "cmd": "0E", "params": "0001" },
+    { "name": "情景1 关", "cmd": "0E", "params": "0000" },
+    { "name": "场景保存", "cmd": "0E", "params": "0101" },
+
+    { "name": "2.4G 对码", "cmd": "27", "params": "01" },
+    { "name": "2.4G 清码", "cmd": "27", "params": "02" },
+
+    { "name": "允许对码", "cmd": "F2", "params": "" },
+    { "name": "禁止对码", "cmd": "F0", "params": "" },
+    { "name": "删除绑定", "cmd": "FA", "params": "" },
+
+    { "name": "用户自定义 键1 按下", "cmd": "3A", "params": "0100AA" },
+    { "name": "用户自定义 键1 松开", "cmd": "3A", "params": "0101AA" }
+  ]
+}

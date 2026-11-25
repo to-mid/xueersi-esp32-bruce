@@ -574,6 +574,8 @@ static const JSPropDef js_ble[] = {
     JS_CFUNC_DEF("scan", 1, native_bleScan),
     JS_CFUNC_DEF("advertise", 1, native_bleAdvertise),
     JS_CFUNC_DEF("stopAdvertise", 0, native_bleStopAdvertise),
+    JS_CFUNC_DEF("rawAdv", 2, native_bleRawAdv),
+    JS_CFUNC_DEF("rawAdvStop", 1, native_bleRawAdvStop),
     JS_PROP_END,
 };
 
