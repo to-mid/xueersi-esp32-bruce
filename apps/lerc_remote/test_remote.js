@@ -6,7 +6,8 @@ const definitions = source.slice(0, source.lastIndexOf('try { main(); }'));
 function environment() {
   const events = [];
   let tick = 0;
-  const gpio = {pinMode() {}, digitalRead() { return 1; }};
+  const modes = {};
+  const gpio = {pinMode(pin, mode) { modes[pin] = mode; }, digitalRead() { return 1; }};
   const ble = {
     rawAdv(hex, ms) { events.push({type:'send', hex, ms, time:tick}); return true; },
     rawAdvStop() { events.push({type:'stop', time:tick}); }
@@ -14,10 +15,10 @@ function environment() {
   const display = {width:()=>160, height:()=>128, color:()=>0};
   for (const method of ['drawFillRect','setTextSize','setTextAlign','setTextColor','drawString','fill']) display[method] = ()=>{};
   const ctx = {require(name) { return {gpio,ble,display,keyboard:{},dialog:{error:()=>{}},storage:{}}[name]; },
-    __dirpath:'/BruceJS/lerc_remote', INPUT:1, now:()=>tick,
+    __dirpath:'/BruceJS/lerc_remote', INPUT:1, INPUT_PULLUP:5, now:()=>tick,
     delay(ms) { tick += ms; if(tick > 1000) throw Error('simulation timeout'); }, console};
   vm.createContext(ctx); vm.runInContext(definitions, ctx);
-  return {ctx,events,gpio,ble, get time(){return tick;}};
+  return {ctx,events,gpio,ble,modes, get time(){return tick;}};
 }
 
 const e = environment(), c = e.ctx;
@@ -46,6 +47,8 @@ function simulation(injectError) {
   const pkt={name:'Test',cmd:'0A',params:''};
   if(injectError) assert.throws(()=>env.ctx.runPacket(cfg,pkt),/radio fault/);
   else env.ctx.runPacket(cfg,pkt);
+  assert.equal(env.modes[34],env.ctx.INPUT); // GPIO34 has an external pull-up.
+  assert.equal(env.modes[12],env.ctx.INPUT_PULLUP); // B must not float low.
   assert.equal(env.events[env.events.length-1].type,'stop');
   if(!injectError) {
     const tx=env.events.filter(x=>x.type==='send');

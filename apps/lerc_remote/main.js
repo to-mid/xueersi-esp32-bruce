@@ -239,7 +239,8 @@ function runPacket(cfg, pkt) {
   var bWasHigh = true;
 
   gpio.pinMode(KEY_A, INPUT);
-  gpio.pinMode(KEY_B, INPUT);
+  // GPIO12 needs the board's internal pull-up; INPUT leaves B floating low.
+  gpio.pinMode(KEY_B, INPUT_PULLUP);
 
   display.fill(C_BG);
   row(2, name, C_ACC, 2);
