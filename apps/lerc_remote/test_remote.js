@@ -30,7 +30,7 @@ assert.throws(()=>c.hexBytes('0G'));
 assert.throws(()=>c.hexBytes('ABC'));
 assert.throws(()=>c.oneByte(256,0));
 assert.throws(()=>c.oneByte('0102',0));
-for (const patch of [{params:'AA'.repeat(10)},{params:12},{cmd:'QZ'},{targets:['1234']},{targets:[]},{intervalMs:0},{advIntervalMs:19},{onRelease:'0A'},{onRelease:{cmd:'0A',params:'AA'.repeat(10)}}]) {
+for (const patch of [{params:'AA'.repeat(10)},{params:12},{cmd:'QZ'},{targets:['1234']},{targets:[]},{intervalMs:0},{advIntervalMs:19},{onRelease:'0A'},{onRelease:{cmd:'0A',params:'AA'.repeat(10)}},{onRelease:{cmd:'0A',repeats:0}},{onRelease:{cmd:'0A',durationMs:19}}]) {
   assert.throws(()=>c.preparePacket(config, {...config.packets[0], ...patch}));
 }
 assert.throws(()=>c.validateConfig({packets:[]}));
@@ -98,19 +98,23 @@ for(const cmd of ['02','03','04','05']) {
   setKeys(adjust,{34:[[100,350]],12:[[750,2000]]});
   adjust.ctx.runList({targets:['0AD3C5AB'],startPackId:1,packets:[{name:'Adjust',cmd,params:''}]});
   const sent=adjust.events.filter(x=>x.type==='send').map(decoded);
-  assert.deepEqual(sent.map(x=>x.cmd),[parseInt(cmd,16),parseInt(cmd,16),parseInt(cmd,16),10]);
-  assert.deepEqual(sent.map(x=>x.id),[1,2,3,4]);
+  assert.deepEqual(sent.map(x=>x.cmd),[parseInt(cmd,16),parseInt(cmd,16),parseInt(cmd,16),10,10,10]);
+  assert.deepEqual(sent.map(x=>x.id),[1,2,3,4,5,6]);
   assert.deepEqual(sent[3].params,[]);
 }
 const multi=environment();
 setKeys(multi,{34:[[100,350]],12:[[900,2000]]});
 multi.ctx.runList({...smallConfig,packets:[{name:'Dim',cmd:'02',params:''}]});
 const multiTx=multi.events.filter(x=>x.type==='send').map(decoded);
-assert.deepEqual(multiTx.map(x=>x.cmd),[2,2,2,10,10]);
-assert.deepEqual(multiTx.map(x=>x.id),[254,255,0,1,2]);
+assert.deepEqual(multiTx.map(x=>x.cmd),[2,2,2,10,10,10,10,10,10]);
+assert.deepEqual(multiTx.map(x=>x.id),[254,255,0,1,2,3,4,5,6]);
 assert.equal(multiTx[3].target,multiTx[0].target);
 assert.equal(multiTx[4].target,multiTx[1].target);
-assert.equal(multi.ctx.PACK_ID,3);
+assert.equal(multi.ctx.PACK_ID,7);
+for(let round=0;round<3;round++) {
+  assert.equal(multiTx[3+round*2].target,multiTx[0].target);
+  assert.equal(multiTx[4+round*2].target,multiTx[1].target);
+}
 const back=environment();
 setKeys(back,{34:[[100,2000]],12:[[350,2000]]});
 back.ctx.runList({targets:['0AD3C5AB'],packets:[{cmd:'04',params:''}]});
@@ -122,10 +126,16 @@ failedRelease.ble.rawAdv=(hex,ms)=>{
   if(decoded(event).cmd===10) throw Error('release radio fault');return true;
 };
 failedRelease.ctx.runList({targets:['0AD3C5AB'],packets:[{cmd:'03',params:''}]});
-assert.equal(failedRelease.events.filter(x=>x.type==='send'&&decoded(x).cmd===10).length,1);
+assert.equal(failedRelease.events.filter(x=>x.type==='send'&&decoded(x).cmd===10).length,3);
 assert(failedRelease.events.some(x=>x.type==='log'&&x.text.indexOf('LERC_RELEASE_ERROR')===0));
 assert.equal(failedRelease.events[failedRelease.events.length-1].type,'stop');
 assert(!config.packets.some(x=>x.name==='Dimming STOP'));
+assert.equal(config.packets[0].name,'Production test');
+const customRelease=environment();
+setKeys(customRelease,{34:[[100,200]],12:[[750,2000]]});
+customRelease.ctx.runList({targets:['0AD3C5AB'],packets:[{cmd:'04',params:'',onRelease:{cmd:'0A',params:'',repeats:2,durationMs:120}}]});
+const stopTimes=customRelease.events.filter(x=>x.type==='send'&&decoded(x).cmd===10).map(x=>x.time);
+assert.deepEqual(stopTimes,[200,320]);
 
 // Emit a matrix for a Python differential check against the supplied source.
 const vectors=[];

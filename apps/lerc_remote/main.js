@@ -206,7 +206,12 @@ function preparePacket(cfg, pkt) {
     if (typeof cfgGet(release, 'params', '') !== 'string') throw new Error('onRelease.params must be hex text');
     var releaseParams = hexBytes(cfgGet(release, 'params', ''));
     if (releaseParams.length > 9) throw new Error('onRelease.params: at most 9 bytes');
-    release = {cmd: oneByte(release.cmd, 0), params: releaseParams};
+    var releaseCmd = oneByte(release.cmd, 0);
+    var repeats = Number(cfgGet(release, 'repeats', releaseCmd === 10 ? 3 : 1));
+    var durationMs = Number(cfgGet(release, 'durationMs', 100));
+    if (!isFinite(repeats) || repeats !== Math.floor(repeats) || repeats < 1 || repeats > 5) throw new Error('onRelease.repeats: 1..5');
+    if (!isFinite(durationMs) || durationMs !== Math.floor(durationMs) || durationMs < 20 || durationMs > 1000) throw new Error('onRelease.durationMs: 20..1000');
+    release = {cmd: releaseCmd, params: releaseParams, repeats: repeats, durationMs: durationMs};
   }
   return {
     targets: targets, interval: interval, advInterval: advInterval, params: params,
@@ -242,22 +247,24 @@ function sendRelease(pending) {
   if (pending === null) return true;
   var packet = pending.packet;
   var ok = true;
+  for (var repeat = 0; repeat < packet.onRelease.repeats; repeat++) {
   for (var r = 0; r < pending.targets.length; r++) {
     try {
       var ad = buildAdv(pending.targets[r], packet.deviceType, packet.group, PACK_ID,
                         packet.onRelease.cmd, packet.onRelease.params);
       var hex = bytesToHex(ad);
-      // A short burst at 20ms gives the receiver time to hear the release.
+      // New packet IDs per round also avoid receiver duplicate filtering.
       if (!ble.rawAdv(hex, 20)) throw new Error('Release BLE start failed');
       console.log('LERC_RELEASE pid=' + PACK_ID + ' ad=' + hex);
       PACK_ID = (PACK_ID + 1) & 0xFF;
-      delay(100);
+      delay(packet.onRelease.durationMs);
     } catch (releaseError) {
       ok = false;
       console.log('LERC_RELEASE_ERROR ' + releaseError.message);
     } finally {
       ble.rawAdvStop();
     }
+  }
   }
   return ok;
 }
@@ -334,6 +341,7 @@ function runList(cfg) {
           ble.rawAdvStop(); advertising = false;
           var ending = pending; pending = null;
           armed = false;
+          if (ending !== null) row(104, 'SENDING STOP...', C_WARN);
           var released = sendRelease(ending);
           row(104, released ? 'SENT ' + sent + ' STOPPED' : 'RELEASE ERROR', released ? C_DIM : C_WARN);
         }
