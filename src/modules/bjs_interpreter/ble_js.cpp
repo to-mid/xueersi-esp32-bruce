@@ -76,6 +76,18 @@ JSValue native_bleStopAdvertise(JSContext *ctx, JSValue *this_val, int argc, JSV
 // ---------------------------------------------------------------------------
 
 static bool bjsRawAdvRunning = false;
+static bool bjsRawAdvOwned = false;
+
+void stopBjsRawAdvertising(bool deinit) {
+    if (!bjsRawAdvOwned) return;
+    BLEAdvertising *adv = BLEDevice::getAdvertising();
+    if (adv != nullptr) adv->stop();
+    bjsRawAdvRunning = false;
+    if (deinit) {
+        BLEDevice::deinit();
+        bjsRawAdvOwned = false;
+    }
+}
 
 static int bjsHexNibble(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -99,7 +111,10 @@ JSValue native_bleRawAdv(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     int highNibble = -1;
     for (const char *p = hex; *p != '\0'; ++p) {
         int nibble = bjsHexNibble(*p);
-        if (nibble < 0) continue; // 忽略空格、冒号、换行等分隔符
+        if (nibble < 0) {
+            if (*p == ' ' || *p == ':' || *p == '-' || *p == '\r' || *p == '\n' || *p == '\t') continue;
+            return JS_NewBool(false);
+        }
         if (highNibble < 0) {
             highNibble = nibble;
             continue;
@@ -110,6 +125,11 @@ JSValue native_bleRawAdv(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     }
     // 奇数个十六进制字符或长度过短（不足以构成一条 AD 结构）都视为无效
     if (highNibble >= 0 || advLen < 3) return JS_NewBool(false);
+    for (size_t offset = 0; offset < advLen;) {
+        const size_t length = advData[offset];
+        if (length == 0 || offset + length + 1 > advLen) return JS_NewBool(false);
+        offset += length + 1;
+    }
 
     int intervalMs = 100;
     if (argc > 1 && JS_IsNumber(ctx, argv[1])) {
@@ -121,18 +141,22 @@ JSValue native_bleRawAdv(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
 
     // 不创建 GATT server，广播即为不可连接广播，扫描器连不上、不会打断发包
     BLEDevice::init("");
+    bjsRawAdvOwned = true;
     BLEAdvertising *adv = BLEDevice::getAdvertising();
     if (adv == nullptr) return JS_NewBool(false);
 
-    if (bjsRawAdvRunning) adv->stop();
+    adv->stop();
+    bjsRawAdvRunning = false;
+    adv->setConnectableMode(BLE_GAP_CONN_MODE_NON);
+    adv->setDiscoverableMode(BLE_GAP_DISC_MODE_NON);
+    adv->enableScanResponse(false);
 
     uint16_t intervalUnits = (uint16_t)(intervalMs * 8 / 5);
     adv->setMinInterval(intervalUnits);
     adv->setMaxInterval(intervalUnits);
 
     BLEAdvertisementData data;
-    data.addData(advData, advLen);
-    adv->setAdvertisementData(data);
+    if (!data.addData(advData, advLen) || !adv->setAdvertisementData(data)) return JS_NewBool(false);
 
     bjsRawAdvRunning = adv->start();
     return JS_NewBool(bjsRawAdvRunning);
@@ -143,14 +167,7 @@ JSValue native_bleRawAdvStop(JSContext *ctx, JSValue *this_val, int argc, JSValu
     bool deinit = false;
     if (argc > 0) deinit = JS_ToBool(ctx, argv[0]);
 
-    BLEAdvertising *adv = BLEDevice::getAdvertising();
-    if (adv != nullptr) adv->stop();
-    bjsRawAdvRunning = false;
-
-    if (deinit) {
-        vTaskDelay(5 / portTICK_PERIOD_MS);
-        BLEDevice::deinit();
-    }
+    stopBjsRawAdvertising(deinit);
     return JS_UNDEFINED;
 }
 

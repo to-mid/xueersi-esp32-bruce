@@ -4,6 +4,8 @@
 
 #include "helpers_js.h"
 
+void stopBjsRawAdvertising(bool deinit = false);
+
 extern "C" {
 JSValue native_bleScan(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_bleAdvertise(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);

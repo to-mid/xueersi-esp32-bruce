@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #include "display_js.h"
+#include "ble_js.h"
 #include "globals_js.h"
 
 char *script = NULL;
@@ -92,6 +93,9 @@ void interpreterHandler(void *pvParameters) {
     JSValue val = JS_Eval(ctx, (const char *)script, scriptSize, scriptName, 0);
 
     run_timers(ctx);
+
+    // Stop raw remote packets before displaying an exception or leaving the app.
+    stopBjsRawAdvertising(true);
 
     LongPress = false;
     if (JS_IsException(val)) { js_fatal_error_handler(ctx); }
