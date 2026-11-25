@@ -39,27 +39,38 @@
     {
       "name": "Brightness +",
       "cmd": "02",
-      "params": ""
+      "params": "",
+      "onRelease": {
+        "cmd": "0A",
+        "params": ""
+      }
     },
     {
       "name": "Brightness -",
       "cmd": "03",
-      "params": ""
+      "params": "",
+      "onRelease": {
+        "cmd": "0A",
+        "params": ""
+      }
     },
     {
-      "name": "Color +",
+      "name": "Color temp +",
       "cmd": "04",
-      "params": ""
+      "params": "",
+      "onRelease": {
+        "cmd": "0A",
+        "params": ""
+      }
     },
     {
-      "name": "Color -",
+      "name": "Color temp -",
       "cmd": "05",
-      "params": ""
-    },
-    {
-      "name": "Dimming STOP",
-      "cmd": "0A",
-      "params": ""
+      "params": "",
+      "onRelease": {
+        "cmd": "0A",
+        "params": ""
+      }
     },
     {
       "name": "Brightness 0x0080",

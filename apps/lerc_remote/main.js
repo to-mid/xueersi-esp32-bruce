@@ -199,11 +199,20 @@ function preparePacket(cfg, pkt) {
   var params = hexBytes(paramText);
   if (params.length > 9) throw new Error("Params: at most 9 bytes");
   if (pkt.cmd === undefined || pkt.cmd === null || pkt.cmd === '') throw new Error("Missing cmd");
+  var cmd = oneByte(pkt.cmd, 0);
+  var release = cfgGet(pkt, 'onRelease', cmd >= 2 && cmd <= 5 ? {cmd: '0A', params: ''} : null);
+  if (release !== null) {
+    if (typeof release !== 'object' || Array.isArray(release) || release.cmd === undefined) throw new Error('Invalid onRelease');
+    if (typeof cfgGet(release, 'params', '') !== 'string') throw new Error('onRelease.params must be hex text');
+    var releaseParams = hexBytes(cfgGet(release, 'params', ''));
+    if (releaseParams.length > 9) throw new Error('onRelease.params: at most 9 bytes');
+    release = {cmd: oneByte(release.cmd, 0), params: releaseParams};
+  }
   return {
     targets: targets, interval: interval, advInterval: advInterval, params: params,
     deviceType: oneByte(cfgGet(pkt, 'deviceType', cfgGet(cfg, 'deviceType', 'FE')), 0xFE),
     group: oneByte(cfgGet(pkt, 'group', cfgGet(cfg, 'group', '00')), 0),
-    cmd: oneByte(pkt.cmd, 0), name: String(cfgGet(pkt, 'name', 'Packet'))
+    cmd: cmd, name: String(cfgGet(pkt, 'name', 'Packet')), onRelease: release
   };
 }
 
@@ -225,6 +234,32 @@ function initPackId(cfg) {
   if (PACK_ID >= 0) return;
   var v = oneByte(cfgGet(cfg, "startPackId", now() & 0xFF), 0);
   PACK_ID = v & 0xFF;
+}
+
+// Finish each addressed adjustment with a real remote STOP frame, then stop BLE.
+// Only targets that received a successful adjustment need a release frame.
+function sendRelease(pending) {
+  if (pending === null) return true;
+  var packet = pending.packet;
+  var ok = true;
+  for (var r = 0; r < pending.targets.length; r++) {
+    try {
+      var ad = buildAdv(pending.targets[r], packet.deviceType, packet.group, PACK_ID,
+                        packet.onRelease.cmd, packet.onRelease.params);
+      var hex = bytesToHex(ad);
+      // A short burst at 20ms gives the receiver time to hear the release.
+      if (!ble.rawAdv(hex, 20)) throw new Error('Release BLE start failed');
+      console.log('LERC_RELEASE pid=' + PACK_ID + ' ad=' + hex);
+      PACK_ID = (PACK_ID + 1) & 0xFF;
+      delay(100);
+    } catch (releaseError) {
+      ok = false;
+      console.log('LERC_RELEASE_ERROR ' + releaseError.message);
+    } finally {
+      ble.rawAdvStop();
+    }
+  }
+  return ok;
 }
 
 // Debounce physical keys without consuming Bruce's shared menu key flags.
@@ -283,6 +318,7 @@ function runList(cfg) {
   var armed = !keys[0].down;
   var index = 0, sent = 0, targetIndex = 0;
   var advertising = false, fault = false, lastSend = -1000000;
+  var pending = null;
   initPackId(cfg);
   drawList(cfg, index);
   console.log('LERC_READY packets=' + cfg.packets.length + ' fs=littlefs');
@@ -294,9 +330,12 @@ function runList(cfg) {
       if (keys[1].down) break;
       if (!keys[0].raw) {
         if (!keys[0].down) { armed = true; fault = false; }
-        if (advertising) {
+        if (advertising || pending !== null) {
           ble.rawAdvStop(); advertising = false;
-          row(104, 'SENT ' + sent + ' STOPPED', C_DIM);
+          var ending = pending; pending = null;
+          armed = false;
+          var released = sendRelease(ending);
+          row(104, released ? 'SENT ' + sent + ' STOPPED' : 'RELEASE ERROR', released ? C_DIM : C_WARN);
         }
       }
       if (!keys[0].raw) {
@@ -340,6 +379,10 @@ function runList(cfg) {
             var hex = bytesToHex(ad);
             if (!ble.rawAdv(hex, packet.advInterval)) throw new Error('BLE start failed');
             advertising = true;
+            if (packet.onRelease !== null) {
+              if (pending === null) pending = {packet: packet, targets: []};
+              if (pending.targets.indexOf(target) < 0) pending.targets.push(target);
+            }
             sent++;
             row(104, 'TX ' + sent + ' PID ' + bytesToHex([PACK_ID]), C_ACC);
             console.log('LERC_TX pid=' + PACK_ID + ' ad=' + hex);
@@ -356,7 +399,8 @@ function runList(cfg) {
       delay(5);
     }
   } finally {
-    ble.rawAdvStop();
+    try { sendRelease(pending); }
+    finally { ble.rawAdvStop(); }
   }
   return index;
 }
